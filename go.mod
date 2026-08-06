@@ -7,9 +7,10 @@ toolchain go1.24.5
 require (
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
+	github.com/go-resty/resty/v2 v2.16.5
 	go.uber.org/goleak v1.3.0
-	golang.org/x/net v0.27.0
-	golang.org/x/text v0.16.0
+	golang.org/x/net v0.33.0
+	golang.org/x/text v0.21.0
 )
 
 require (
