@@ -91,6 +91,7 @@ func Require(runtime *goja.Runtime, module *goja.Object) {
 	}
 	obj := module.Get("exports").(*goja.Object)
 	obj.Set("format", u.js_format)
+	obj.Set("inspect", Inspect(runtime))
 }
 
 func New(runtime *goja.Runtime) *Util {
