@@ -1,6 +1,6 @@
-module github.com/dop251/goja_nodejs
+module github.com/sealdice/goja_ext
 
-go 1.21
+go 1.23
 
 toolchain go1.24.5
 
@@ -20,3 +20,5 @@ require (
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 )
+
+replace github.com/dop251/goja_nodejs => .

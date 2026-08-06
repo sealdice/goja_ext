@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/abort"
-	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/sealdice/goja_ext/abort"
+	"github.com/sealdice/goja_ext/eventloop"
 )
 
 func startFetchLoop(t *testing.T) *eventloop.EventLoop {

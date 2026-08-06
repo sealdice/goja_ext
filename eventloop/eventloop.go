@@ -35,8 +35,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/console"
-	"github.com/dop251/goja_nodejs/require"
+	"github.com/sealdice/goja_ext/console"
+	"github.com/sealdice/goja_ext/require"
 )
 
 // Logger is a simple logging interface that can be implemented by any logging library.
@@ -616,13 +616,13 @@ func (loop *EventLoop) RequireModule(modulePath string) (goja.Value, error) {
 	if loop.jsRequire == nil {
 		return nil, errors.New("require module not initialized")
 	}
-	
+
 	// Use a channel to synchronously wait for the result
 	resultChan := make(chan struct {
 		value goja.Value
 		err   error
 	}, 1)
-	
+
 	// Schedule the require operation on the event loop
 	scheduled := loop.RunOnLoop(func(vm *goja.Runtime) {
 		module, err := loop.jsRequire.Require(modulePath)
@@ -631,11 +631,11 @@ func (loop *EventLoop) RequireModule(modulePath string) (goja.Value, error) {
 			err   error
 		}{module, err}
 	})
-	
+
 	if !scheduled {
 		return nil, errors.New("event loop is terminated")
 	}
-	
+
 	// Wait for the result
 	result := <-resultChan
 	return result.value, result.err

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/gorilla/websocket"
+	"github.com/sealdice/goja_ext/eventloop"
 )
 
 // Logger 复用 eventloop 的日志接口，调用方可共用同一实例。

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/gorilla/websocket"
+	"github.com/sealdice/goja_ext/eventloop"
 )
 
 func startLoop(t *testing.T) *eventloop.EventLoop {

@@ -13,8 +13,8 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/go-resty/resty/v2"
+	"github.com/sealdice/goja_ext/eventloop"
 )
 
 type fetchRequestData struct {
