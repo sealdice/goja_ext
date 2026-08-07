@@ -1,6 +1,7 @@
 # Goja Node 基础模块与 bare-stack classic streams 功能设计
 
 > **范围（2026-08-07）**：新增 `events`、`path`、`string_decoder`、`timers`(+`timers/promises`)四个 Node 兼容模块，并将 `stream`/`node:stream` facade 的底层引擎从 `readable-stream@4.7.0` 替换为 **streamx + canonical events（bare-events 改编）**。`stream/web` 与 fs 模块保持基于 `web-streams-polyfill@4.3.0` 的实现，不做改动。
+> **状态（2026-08-07）**：已实现并提交；`streams/internal/streamx` 的 bundle 由 `scripts/build-node-streams.mjs`（esbuild）构建，SHA-256 见其 README。
 > **实现说明**：本文档描述外部可观察行为与 Goja 集成契约；经典流状态机由 vendored `streamx` 提供，事件基座由改编版 `bare-events` 提供，Go 层只负责模块装配、canonical 身份、宿主集成与 Web↔classic 桥接。
 
 ---
