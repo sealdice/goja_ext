@@ -120,6 +120,7 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 		exports := module.Get("exports").ToObject(rt)
 		if promises {
 			bindPromiseExports(instance, exports)
+			bindNodePromiseExports(instance, exports)
 		} else {
 			bindFullExports(instance, exports)
 		}
@@ -212,7 +213,7 @@ func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
 	}
 	instance := &moduleInstance{rt: rt, core: core, scheduler: scheduler, streams: cfg.withStream}
 	exports := rt.NewObject()
-	bindFullExports(instance, exports)
+	bindDenoExports(instance, exports)
 	runtimehost.Store(rt, runtimeGlobalExportsKey, &runtimeExportsState{
 		exports:   exports,
 		scheduler: scheduler,
@@ -268,6 +269,11 @@ func init() {
 }
 
 func bindFullExports(instance *moduleInstance, exports *goja.Object) {
+	bindDenoExports(instance, exports)
+	bindNodeExports(instance, exports)
+}
+
+func bindDenoExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "chdir", instance.chdir)
 	setFunction(instance.rt, exports, "chmodSync", instance.chmodSync)
 	setFunction(instance.rt, exports, "chmod", instance.chmod)
@@ -307,7 +313,7 @@ func bindFullExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "writeTextFileSync", instance.writeTextFileSync)
 	setFunction(instance.rt, exports, "writeTextFile", instance.writeTextFile)
 	_ = exports.Set("FsFile", newFsFileConstructor(instance.rt))
-	bindNodeExports(instance, exports)
+	bindDenoExtraExports(instance, exports)
 }
 
 func bindPromiseExports(instance *moduleInstance, exports *goja.Object) {
@@ -329,6 +335,48 @@ func bindPromiseExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "utime", instance.utime)
 	setFunction(instance.rt, exports, "writeFile", instance.writeFile)
 	setFunction(instance.rt, exports, "writeTextFile", instance.writeTextFile)
+	bindDenoPromiseExtraExports(instance, exports)
+}
+
+func bindDenoExtraExports(instance *moduleInstance, exports *goja.Object) {
+	if instance.core.HasLstat() {
+		setFunction(instance.rt, exports, "lstatSync", instance.lstatSync)
+		setFunction(instance.rt, exports, "lstat", instance.lstat)
+	}
+	if instance.core.HasRealpath() {
+		setFunction(instance.rt, exports, "realPathSync", instance.realpathSync)
+		setFunction(instance.rt, exports, "realPath", instance.realpath)
+	}
+	if instance.core.HasReadlink() {
+		setFunction(instance.rt, exports, "readLinkSync", instance.readlinkSync)
+		setFunction(instance.rt, exports, "readLink", instance.readlink)
+	}
+	if instance.core.HasSymlink() {
+		setFunction(instance.rt, exports, "symlinkSync", instance.symlinkSync)
+		setFunction(instance.rt, exports, "symlink", instance.symlink)
+	}
+	if instance.core.HasLink() {
+		setFunction(instance.rt, exports, "linkSync", instance.linkSync)
+		setFunction(instance.rt, exports, "link", instance.link)
+	}
+}
+
+func bindDenoPromiseExtraExports(instance *moduleInstance, exports *goja.Object) {
+	if instance.core.HasLstat() {
+		setFunction(instance.rt, exports, "lstat", instance.lstat)
+	}
+	if instance.core.HasRealpath() {
+		setFunction(instance.rt, exports, "realPath", instance.realpath)
+	}
+	if instance.core.HasReadlink() {
+		setFunction(instance.rt, exports, "readLink", instance.readlink)
+	}
+	if instance.core.HasSymlink() {
+		setFunction(instance.rt, exports, "symlink", instance.symlink)
+	}
+	if instance.core.HasLink() {
+		setFunction(instance.rt, exports, "link", instance.link)
+	}
 }
 
 func setFunction(rt *goja.Runtime, object *goja.Object, name string, fn func(goja.FunctionCall) goja.Value) {

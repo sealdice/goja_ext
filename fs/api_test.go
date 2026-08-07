@@ -41,6 +41,57 @@ func TestEnableAndRequireShareCanonicalCore(t *testing.T) {
 	}
 }
 
+func TestEnableInstallsOnlyDenoFacade(t *testing.T) {
+	rt := goja.New()
+	if err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/workspace")); err != nil {
+		t.Fatal(err)
+	}
+	value, err := rt.RunString(`
+		[
+			typeof fs.readTextFileSync,
+			typeof fs.appendFileSync,
+			typeof fs.createReadStream,
+			typeof fs.constants
+		].join("|");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "function|undefined|undefined|undefined" {
+		t.Fatalf("Deno facade surface = %q", got)
+	}
+}
+
+func TestWithStreamsFalseOmitsEveryStreamSurface(t *testing.T) {
+	rt := goja.New()
+	registry := require.NewRegistry()
+	registry.RegisterNativeModule("fs", RequireWithOptions(
+		WithFS(afero.NewMemMapFs()),
+		WithCwd("/workspace"),
+		WithStreams(false),
+	))
+	registry.Enable(rt)
+	value, err := rt.RunString(`
+		const filesystem = require("fs");
+		filesystem.mkdirSync(".", { recursive: true });
+		const file = filesystem.openSync("value.txt", { write: true, create: true });
+		const result = [
+			typeof filesystem.createReadStream,
+			typeof filesystem.createWriteStream,
+			"readable" in file,
+			"writable" in file
+		].join("|");
+		file.close();
+		result;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "undefined|undefined|false|false" {
+		t.Fatalf("disabled stream surface = %q", got)
+	}
+}
+
 func TestRuntimeCoreRejectsConflictingBackend(t *testing.T) {
 	rt := goja.New()
 	first := afero.NewMemMapFs()

@@ -252,31 +252,36 @@
 
 **Files:**
 - Create: `fs/extra/capabilities.go`
-- Future: `fs/extra/links.go`
+- Implement: `fs/extra/capabilities.go`
 - Future: `fs/extra/locking.go`
 - Future: `fs/extra/terminal.go`
 - Future: `fs/extra/watch.go`
-- Future: `fs/extra/extra_test.go`
+- Create: `fs/extra/capabilities_test.go`
 
-- [x] **Step 1: Create removable extension placeholder**
+- [x] **Step 1: Create removable extension package**
 
-  Add `fs/extra/capabilities.go` as a package-level TODO. The core `fs` package does not import `fs/extra`, so embedders can delete the directory without changing core Deno FS behavior.
+  Add `fs/extra/capabilities.go` as an Afero adapter package. The core `fs`
+  package does not import `fs/extra`, so embedders can remove the adapters
+  without changing core Deno FS behavior.
 
 - [x] **Step 2: Keep symlink/hardlink/watch/lock/terminal out of core**
 
   Core exports omit `lstat`, `readlink`, `symlink`, `link`, `realPath`, `umask`, file locks, watch, raw mode, and terminal handling. These remain explicitly optional rather than partially emulated through `Stat`.
 
-- [ ] **Future Step 3: Write capability detection tests**
+- [x] **Step 3: Write capability detection tests**
 
   Use `MemMapFs`, `OsFs`, and small stubs implementing `afero.Lstater`, `afero.LinkReader`, `afero.Linker`, or watcher interfaces. Verify that unsupported methods are omitted or return `ENOSYS` according to the selected option.
 
-- [ ] **Future Step 4: Implement capability interfaces**
+- [x] **Step 4: Implement link capability interfaces**
 
   Detect each optional interface independently. Do not infer symlink support from `Stat`; do not expose `realpath` unless the backend explicitly provides resolution semantics.
 
-- [ ] **Future Step 5: Implement and test selected extensions**
+- [x] **Step 5: Implement and test selected link extensions**
 
-  Add link, lock, terminal, watcher, and realpath files only for capabilities the project decides to keep.
+  Implement `lstat`, `readlink`, `symlink`, host-provided hard link, and
+  symlink-aware `realpath` with `ELOOP` detection. Watch, lock, and terminal
+  APIs remain outside the declared portable subset rather than being exposed
+  as no-op capabilities.
 
 ## Task 8: Verification and regression pass
 

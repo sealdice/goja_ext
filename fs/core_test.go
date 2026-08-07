@@ -5,10 +5,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/afero"
 )
+
+func TestWithExtraCapabilitiesRejectsUnknownCapability(t *testing.T) {
+	_, err := NewCore(WithExtraCapabilities(struct{ Name string }{Name: "unknown"}))
+	if err == nil || !strings.Contains(err.Error(), "unsupported capability") {
+		t.Fatalf("unknown capability error = %v", err)
+	}
+}
 
 func TestCoreMemMapFileLifecycle(t *testing.T) {
 	backend := afero.NewMemMapFs()
