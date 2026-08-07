@@ -66,9 +66,12 @@ func TestEventSource_MessageEvents(t *testing.T) {
 }
 
 func TestEventSource_LastEventIDHeader(t *testing.T) {
-	var gotLastEventID string
+	gotLastEventID := make(chan string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotLastEventID = r.Header.Get("Last-Event-ID")
+		select {
+		case gotLastEventID <- r.Header.Get("Last-Event-ID"):
+		default:
+		}
 		flusher, _ := w.(http.Flusher)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "retry: 100\nid: 42\ndata: first\n\n")
@@ -91,14 +94,15 @@ func TestEventSource_LastEventIDHeader(t *testing.T) {
 			t.Fatalf("run: %v", err)
 		}
 	})
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		if gotLastEventID == "42" {
-			break
+	deadline := time.After(4 * time.Second)
+	for {
+		select {
+		case id := <-gotLastEventID:
+			if id == "42" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for reconnect with Last-Event-ID=42")
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if gotLastEventID != "42" {
-		t.Fatalf("expected reconnect to send Last-Event-ID=42, got %q", gotLastEventID)
 	}
 }
