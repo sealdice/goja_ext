@@ -120,3 +120,48 @@ func TestTimersWithoutLoopThrows(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 }
+
+func TestTimersClearInterval(t *testing.T) {
+	out := runWithLoop(t, `
+		const t = require("timers");
+		let cnt = 0;
+		const id = t.setInterval(function () { cnt++; }, 5);
+		setTimeout(function () { t.clearInterval(id); }, 20);
+		setTimeout(function () {
+			const first = cnt;
+			setTimeout(function () {
+				globalThis.__result = String(first === cnt);
+			}, 25);
+		}, 35);
+	`)
+	if out != "true" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestTimersSchedulerWait(t *testing.T) {
+	out := runWithLoop(t, `
+		const tp = require("timers/promises");
+		tp.scheduler.wait(5, "done").then(function (v) {
+			globalThis.__result = String(v);
+		});
+	`)
+	if out != "done" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestTimersClearTimeout(t *testing.T) {
+	out := runWithLoop(t, `
+		const t = require("timers");
+		let fired = 0;
+		const id = t.setTimeout(function () { fired++; }, 5);
+		t.clearTimeout(id);
+		setTimeout(function () {
+			globalThis.__result = String(fired);
+		}, 30);
+	`)
+	if out != "0" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}

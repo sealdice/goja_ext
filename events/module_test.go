@@ -174,3 +174,142 @@ func TestEventsOnceAndGetEventListeners(t *testing.T) {
 		t.Fatalf("unexpected: %s", out)
 	}
 }
+
+func TestEventOnceRemoval(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		let cnt = 0;
+		e.once("x", function () { cnt++; });
+		e.emit("x");
+		const after1 = cnt;
+		const after1Count = e.listenerCount("x");
+		e.emit("x");
+		JSON.stringify([cnt, after1, after1Count]);
+	`)
+	if out != `[1,1,0]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventPrepend(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		const order = [];
+		e.on("x", function () { order.push("a"); });
+		e.prependListener("x", function () { order.push("b"); });
+		e.emit("x");
+		JSON.stringify(order);
+	`)
+	if out != `["b","a"]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventRemoveAllListeners(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e1 = new EventEmitter();
+		e1.on("a", function () {}).on("a", function () {});
+		e1.removeAllListeners("a");
+		const a = [e1.listenerCount("a"), e1.emit("a")];
+		const e2 = new EventEmitter();
+		e2.on("a", function () {}).on("b", function () {});
+		e2.removeAllListeners();
+		const b = [e2.listenerCount("a"), e2.listenerCount("b")];
+		JSON.stringify([a, b]);
+	`)
+	if out != `[[0,false],[0,0]]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventErrorWithListener(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		let got = null;
+		e.on("error", function (err) { got = err; });
+		const err = new Error("x");
+		e.emit("error", err);
+		JSON.stringify([got === err, got.message]);
+	`)
+	if out != `[true,"x"]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventEmitReturnValue(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		const before = e.emit("nope");
+		e.on("has", function () {});
+		const after = e.emit("has");
+		JSON.stringify([before, after]);
+	`)
+	if out != `[false,true]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventThisBinding(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		let self = null;
+		e.on("x", function () { self = this; });
+		e.emit("x");
+		JSON.stringify([self === e]);
+	`)
+	if out != `[true]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventEventNames(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const e = new EventEmitter();
+		e.on("a", function () {}).on("b", function () {}).on("c", function () {});
+		const names = e.eventNames();
+		JSON.stringify([names.length, names.indexOf("a") !== -1, names.indexOf("b") !== -1, names.indexOf("c") !== -1]);
+	`)
+	if out != `[3,true,true,true]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventOnIterator(t *testing.T) {
+	rt := newRT(t)
+	runScript(t, rt, `
+		const events = require("events");
+		const { EventEmitter } = events;
+		const e = new EventEmitter();
+		const iter = events.on(e, "data");
+		e.emit("data", 1);
+		e.emit("data", 2);
+		const collected = [];
+		iter.next().then(function (r1) {
+			collected.push(r1.value);
+			return iter.next();
+		}).then(function (r2) {
+			collected.push(r2.value);
+			return iter.return();
+		}).then(function () {
+			globalThis.__result = JSON.stringify(collected);
+		});
+	`)
+	out := runScript(t, rt, `globalThis.__result;`)
+	if out != `[[1],[2]]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
