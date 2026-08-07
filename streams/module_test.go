@@ -414,3 +414,111 @@ func TestControllerIdentityAndBrandChecks(t *testing.T) {
 		t.Fatalf("unexpected controller/brand checks: %s", result)
 	}
 }
+
+func TestTextDecoderStreamFatal(t *testing.T) {
+	result := runStreamsScript(t, `
+		const stream = new TextDecoderStream("utf-8", { fatal: true });
+		const reader = stream.readable.getReader();
+		const writer = stream.writable.getWriter();
+		writer.write(new Uint8Array([0xff])).catch(function () {});
+		reader.read().then(
+			function (item) { globalThis.__result = "value:" + item.value; },
+			function (err) {
+				globalThis.__result = (err instanceof TypeError ? "TypeError" : "Other") + ":" + err.message;
+			}
+		);
+	`)
+	if result != "TypeError:invalid UTF-8 sequence" {
+		t.Fatalf("unexpected fatal result: %s", result)
+	}
+}
+
+func TestTextDecoderStreamIgnoreBOM(t *testing.T) {
+	result := runStreamsScript(t, `
+		function collect(reader, values) {
+			return reader.read().then(function (item) {
+				if (item.done) return values;
+				values.push(item.value);
+				return collect(reader, values);
+			});
+		}
+
+		const kept = new TextDecoderStream("utf-8", { ignoreBOM: true });
+		const keptReader = kept.readable.getReader();
+		const keptWriter = kept.writable.getWriter();
+		const keptReading = collect(keptReader, []);
+		keptWriter.write(new Uint8Array([0xEF, 0xBB, 0xBF, 0x61])).then(function () {
+			return keptWriter.close();
+		});
+
+		const stripped = new TextDecoderStream("utf-8");
+		const strippedReader = stripped.readable.getReader();
+		const strippedWriter = stripped.writable.getWriter();
+		const strippedReading = collect(strippedReader, []);
+		strippedWriter.write(new Uint8Array([0xEF, 0xBB, 0xBF, 0x61])).then(function () {
+			return strippedWriter.close();
+		});
+
+		Promise.all([keptReading, strippedReading]).then(function (items) {
+			globalThis.__result = items[0].join("") + "|" + items[1].join("");
+		});
+	`)
+	if result != "\ufeffa|a" {
+		t.Fatalf("unexpected ignoreBOM result: %q", result)
+	}
+}
+
+func TestTextDecoderStreamUnsupportedEncoding(t *testing.T) {
+	result := runStreamsScript(t, `
+		try {
+			new TextDecoderStream("utf-16");
+			globalThis.__result = "no-throw";
+		} catch (err) {
+			globalThis.__result = (err instanceof RangeError ? "RangeError" : "Other") + ":" + err.message;
+		}
+	`)
+	if result != "RangeError:The encoding label is not supported" {
+		t.Fatalf("unexpected unsupported encoding result: %s", result)
+	}
+}
+
+func TestReadableStreamCancel(t *testing.T) {
+	result := runStreamsScript(t, `
+		let cancelReason = null;
+		const stream = new ReadableStream({
+			start(controller) { controller.enqueue("first"); },
+			cancel(reason) { cancelReason = reason; },
+		});
+		const reader = stream.getReader();
+		reader.read().then(function () {
+			return reader.cancel("done");
+		}).then(function () {
+			return reader.read();
+		}).then(function (after) {
+			globalThis.__result = cancelReason + ":" + after.done;
+		}, function (err) {
+			globalThis.__result = "err:" + err;
+		});
+	`)
+	if result != "done:true" {
+		t.Fatalf("unexpected cancel result: %s", result)
+	}
+}
+
+func TestWritableStreamAbort(t *testing.T) {
+	result := runStreamsScript(t, `
+		let abortReason = null;
+		const stream = new WritableStream({
+			abort(reason) { abortReason = String(reason); },
+		});
+		const writer = stream.getWriter();
+		writer.abort("boom").then(function () {
+			globalThis.__result = "aborted:" + abortReason;
+		}, function (err) {
+			globalThis.__result = "err:" + err;
+		});
+	`)
+	if result != "aborted:boom" {
+		t.Fatalf("unexpected abort result: %s", result)
+	}
+}

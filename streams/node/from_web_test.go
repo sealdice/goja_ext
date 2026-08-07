@@ -116,3 +116,62 @@ func TestNodePipelineAndFinished(t *testing.T) {
 		t.Fatalf("unexpected: %s", result)
 	}
 }
+
+func TestNodeWritableFromWeb(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const { WritableStream } = require("streams");
+		const collected = [];
+		const web = new WritableStream({
+			write(chunk) { collected.push(String(chunk)); return Promise.resolve(); },
+			close() { return Promise.resolve(); },
+		});
+		const w = stream.Writable.fromWeb(web);
+		w.write("hi");
+		w.end();
+		let p = Promise.resolve();
+		for (let i = 0; i < 10; i++) p = p.then(function () {});
+		p.then(function () {
+			globalThis.__result = collected.join("|");
+		});
+	`)
+	if result != "hi" {
+		t.Fatalf("unexpected Writable.fromWeb result: %s", result)
+	}
+}
+
+func TestNodeDuplexPair(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const pair = stream.duplexPair();
+		const a = pair[0];
+		const b = pair[1];
+		const received = [];
+		b.on("data", function (chunk) {
+			received.push(String.fromCharCode.apply(null, chunk));
+		});
+		b.on("end", function () {
+			globalThis.__result = received.join(",");
+		});
+		a.write("hello");
+		a.end();
+	`)
+	if result != "hello" {
+		t.Fatalf("unexpected duplexPair result: %s", result)
+	}
+}
+
+func TestNodeObjectMode(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const r = stream.Readable.from([{ a: 1 }, { b: 2 }]);
+		const out = [];
+		r.on("data", function (d) { out.push(JSON.stringify(d)); });
+		r.on("end", function () {
+			globalThis.__result = out.join(",");
+		});
+	`)
+	if result != "{\"a\":1},{\"b\":2}" {
+		t.Fatalf("unexpected objectMode result: %s", result)
+	}
+}

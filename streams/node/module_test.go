@@ -93,3 +93,53 @@ func TestNodeTransformAndEvents(t *testing.T) {
 		t.Fatalf("unexpected node transform output: %s", result)
 	}
 }
+
+func TestNodeFinished(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const w = new stream.Writable({
+			write(chunk, encoding, cb) { cb(null); },
+		});
+		stream.finished(w, function (err) {
+			globalThis.__result = String(err);
+		});
+		w.write("a");
+		w.end();
+	`)
+	if result != "null" {
+		t.Fatalf("unexpected finished result: %s", result)
+	}
+}
+
+func TestNodeFinishedDestroyError(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const w = new stream.Writable({
+			write(chunk, encoding, cb) { cb(null); },
+		});
+		stream.finished(w, { cleanup: true }, function (err) {
+			globalThis.__result = String(err);
+		});
+		w.destroy(new Error("kaboom"));
+	`)
+	if result != "Error: kaboom" {
+		t.Fatalf("unexpected finished error result: %s", result)
+	}
+}
+
+func TestNodeAddAbortSignal(t *testing.T) {
+	result := runNodeStreamsScript(t, `
+		const stream = require("stream");
+		const { AbortController } = require("abort");
+		const ac = new AbortController();
+		const r = new stream.Readable({ read() {} });
+		stream.addAbortSignal(ac.signal, r);
+		r.on("error", function (err) {
+			globalThis.__result = err.message;
+		});
+		ac.abort(new Error("boom"));
+	`)
+	if result != "boom" {
+		t.Fatalf("unexpected addAbortSignal result: %s", result)
+	}
+}
