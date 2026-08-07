@@ -116,3 +116,113 @@ func TestNodeRmRealpathAccess(t *testing.T) {
 		t.Fatalf("unexpected: %s", result)
 	}
 }
+
+func TestStatsDirectoryFields(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.mkdirSync("d");
+		const st = fs.statSync("d");
+		globalThis.__result = [
+			String(st.isDirectory()),
+			String(st.isFile()),
+			String((st.mode & 0xF000) === 0x4000),
+		].join("|");
+	`)
+	if result != "true|false|true" {
+		t.Fatalf("unexpected directory stats: %s", result)
+	}
+}
+
+func TestStatsFields(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeFileSync("f.txt", "x");
+		const st = fs.statSync("f.txt");
+		globalThis.__result = [
+			String(st.isFile()),
+			String((st.mode & 0xF000) === 0x8000),
+			String(st.birthtime === null),
+			String(st.atime === null),
+			String(st.ctime === null),
+			Object.prototype.toString.call(st.mtime),
+		].join("|");
+	`)
+	if result != "true|true|true|true|true|[object Date]" {
+		t.Fatalf("unexpected stats fields: %s", result)
+	}
+}
+
+func TestCreateReadStreamStartEnd(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeFileSync("f", "0123456789");
+		const chunks = [];
+		const rs = fs.createReadStream("f", { start: 2, end: 5, encoding: "utf8" });
+		rs.on("data", function (c) { chunks.push(c); });
+		rs.on("end", function () { globalThis.__result = chunks.join(""); });
+		rs.on("error", function (e) { globalThis.__result = "ERR:" + e.message; });
+	`)
+	if result != "2345" {
+		t.Fatalf("unexpected start/end stream result: %s", result)
+	}
+}
+
+func TestCreateReadStreamHighWaterMark(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeFileSync("big", new Array(70000).fill("x").join(""));
+		const chunks = [];
+		const rs = fs.createReadStream("big", { highWaterMark: 1024 });
+		rs.on("data", function (c) { chunks.push(c); });
+		rs.on("end", function () { globalThis.__result = String(chunks.length > 1); });
+		rs.on("error", function (e) { globalThis.__result = "ERR:" + e.message; });
+	`)
+	if result != "true" {
+		t.Fatalf("unexpected highWaterMark chunking result: %s", result)
+	}
+}
+
+func TestParseNodeFlags(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		const results = [];
+
+		fs.writeFileSync("a.txt", "AB");
+		const fa = fs.openSync("a.txt", "a");
+		fa.writeSync("C");
+		fa.close();
+		results.push(fs.readFileSync("a.txt", "utf8"));
+
+		fs.writeFileSync("wx.txt", "x");
+		let wxErr = null;
+		try { fs.openSync("wx.txt", "wx"); } catch (e) { wxErr = e; }
+		results.push(wxErr ? wxErr.code : "no-error");
+
+		fs.writeFileSync("r.txt", "read");
+		const fr = fs.openSync("r.txt", "r");
+		const buf = new Uint8Array(4);
+		fr.readSync(buf);
+		fr.close();
+		results.push(Array.prototype.slice.call(buf).join(","));
+
+		globalThis.__result = results.join("|");
+	`)
+	if result != "ABC|EEXIST|114,101,97,100" {
+		t.Fatalf("unexpected parseNodeFlags result: %s", result)
+	}
+}
+
+func TestInvalidNodeFlags(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		let err = null;
+		try { fs.openSync("f", "zzz"); } catch (e) { err = e; }
+		globalThis.__result = [
+			String(err instanceof TypeError),
+			String(err.message.indexOf("Unknown file open flags") >= 0),
+		].join("|");
+	`)
+	if result != "true|true" {
+		t.Fatalf("unexpected invalid flags result: %s", result)
+	}
+}

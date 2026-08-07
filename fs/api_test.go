@@ -11,19 +11,19 @@ import (
 	"github.com/spf13/afero"
 )
 
-func runFSAPIScript(t *testing.T, script string) string {
+func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {
 	t.Helper()
 
 	registry := require.NewRegistry()
 	backend := afero.NewMemMapFs()
 	loader := RequireWithOptions(
 		WithFS(backend),
-		WithCwd("/workspace"),
+		WithCwd(cwd),
 		WithStreams(true),
 	)
 	promiseLoader := RequirePromisesWithOptions(
 		WithFS(backend),
-		WithCwd("/workspace"),
+		WithCwd(cwd),
 	)
 	registry.RegisterNativeModule("fs", loader)
 	registry.RegisterNativeModule("fs/promises", promiseLoader)
@@ -64,6 +64,10 @@ func runFSAPIScript(t *testing.T, script string) string {
 		t.Fatalf("script failed: %v", runErr)
 	}
 	return result
+}
+
+func runFSAPIScript(t *testing.T, script string) string {
+	return runFSAPIScriptWithCwd(t, "/workspace", script)
 }
 
 func TestDenoPathAPISyncAndPromises(t *testing.T) {
@@ -462,4 +466,60 @@ type blockingOpenFs struct {
 func (fsys *blockingOpenFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	<-fsys.release
 	return fsys.Fs.OpenFile(name, flag, perm)
+}
+
+func TestErrorCodes_ENOENT(t *testing.T) {
+	result := runFSAPIScriptWithCwd(t, "/", `
+		const fs = require("fs");
+		let e = null;
+		try { fs.statSync("/missing"); } catch (err) { e = err; }
+		globalThis.__result = [e.code, e.syscall, e.path].join("|");
+	`)
+	if result != "ENOENT|stat|/missing" {
+		t.Fatalf("unexpected ENOENT result: %s", result)
+	}
+}
+
+func TestErrorCodes_ENOENTOpenAndRead(t *testing.T) {
+	result := runFSAPIScriptWithCwd(t, "/", `
+		const fs = require("fs");
+		const codes = [];
+		let o = null;
+		try { fs.openSync("/missing", "r"); } catch (err) { o = err; }
+		codes.push(o ? o.code + ":" + o.syscall + ":" + o.path : "no-err");
+		let r = null;
+		try { fs.readFileSync("/missing"); } catch (err) { r = err; }
+		codes.push(r ? r.code + ":" + r.syscall + ":" + r.path : "no-err");
+		globalThis.__result = codes.join("|");
+	`)
+	if result != "ENOENT:open:/missing|ENOENT:readFile:/missing" {
+		t.Fatalf("unexpected open/readFile error result: %s", result)
+	}
+}
+
+func TestErrorCodes_EEXIST(t *testing.T) {
+	result := runFSAPIScriptWithCwd(t, "/", `
+		const fs = require("fs");
+		fs.mkdirSync("/d");
+		let e = null;
+		try { fs.mkdirSync("/d"); } catch (err) { e = err; }
+		globalThis.__result = [e.code, e.syscall, e.path].join("|");
+	`)
+	if result != "EEXIST|mkdir|/d" {
+		t.Fatalf("unexpected EEXIST result: %s", result)
+	}
+}
+
+func TestReadFileSyncEncodings(t *testing.T) {
+	result := runFSAPIScriptWithCwd(t, "/workspace", `
+		const fs = require("fs");
+		fs.writeFileSync("enc.bin", new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]));
+		globalThis.__result = [
+			fs.readFileSync("enc.bin", "base64"),
+			fs.readFileSync("enc.bin", "hex"),
+		].join("|");
+	`)
+	if result != "aGVsbG8=|68656c6c6f" {
+		t.Fatalf("unexpected encoding result: %s", result)
+	}
 }

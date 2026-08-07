@@ -172,3 +172,99 @@ func (file shortWriteFile) Write(p []byte) (int, error) {
 	}
 	return len(p) - 1, nil
 }
+
+func TestOpenFlagCreateNew(t *testing.T) {
+	core, err := NewCore(WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := core.OpenFile("x", openWrite|openCreate|openTruncate, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = core.OpenFile("x", openWrite|openCreateNew, 0o644)
+	if !errors.Is(err, os.ErrExist) {
+		t.Fatalf("expected os.ErrExist, got %v", err)
+	}
+}
+
+func TestOpenFlagAppend(t *testing.T) {
+	core, err := NewCore(WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := core.OpenFile("f", openWrite|openCreate|openTruncate, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("AB")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a, err := core.OpenFile("f", openWrite|openAppend, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Write([]byte("C")); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r, err := core.OpenFile("f", openRead, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "ABC" {
+		t.Fatalf("expected appended content ABC, got %q", data)
+	}
+}
+
+func TestClosedHandleOperations(t *testing.T) {
+	core, err := NewCore(WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := core.OpenFile("f", openWrite|openCreate|openTruncate, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := make([]byte, 4)
+	if _, err := f.Read(buf); !errors.Is(err, ErrClosedHandle) {
+		t.Fatalf("Read after close: expected ErrClosedHandle, got %v", err)
+	}
+	if _, err := f.Seek(0, 0); !errors.Is(err, ErrClosedHandle) {
+		t.Fatalf("Seek after close: expected ErrClosedHandle, got %v", err)
+	}
+	if _, err := f.Stat(); !errors.Is(err, ErrClosedHandle) {
+		t.Fatalf("Stat after close: expected ErrClosedHandle, got %v", err)
+	}
+	if err := f.Truncate(0); !errors.Is(err, ErrClosedHandle) {
+		t.Fatalf("Truncate after close: expected ErrClosedHandle, got %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("second Close: expected nil, got %v", err)
+	}
+}
