@@ -13,8 +13,67 @@ import (
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/abort"
 	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/require"
 	"github.com/sealdice/goja_ext/url"
 )
+
+func TestEnableAndRequireShareCanonicalConstructors(t *testing.T) {
+	rt := goja.New()
+	new(require.Registry).Enable(rt)
+	Enable(rt)
+	value, err := rt.RunString(`
+		const web = require("fetch");
+		Headers === web.Headers && Request === web.Request &&
+		Response === web.Response && FormData === web.FormData &&
+		require("fetch") === web;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value.ToBoolean() {
+		t.Fatal("global and CommonJS fetch constructors are not canonical")
+	}
+}
+
+func TestFetchResponseUsesCanonicalPrototypes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Test", "yes")
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(vm *goja.Runtime) {
+		new(require.Registry).Enable(vm)
+		Enable(vm)
+		if err := EnableFetch(vm, loop); err != nil {
+			t.Fatalf("EnableFetch: %v", err)
+		}
+		_, err := vm.RunString(`
+			globalThis.__done = false;
+			fetch("` + srv.URL + `").then((response) => {
+				const web = require("fetch");
+				globalThis.__canonical = response instanceof Response &&
+					response instanceof web.Response &&
+					response.headers instanceof Headers;
+				globalThis.__done = true;
+			}, (error) => {
+				globalThis.__prototypeError = String(error);
+				globalThis.__done = true;
+			});
+		`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitBool(t, loop, "__done")
+	if errText := gstr(t, loop, "__prototypeError"); errText != "" {
+		t.Fatalf("fetch rejected: %s", errText)
+	}
+	if got := gstr(t, loop, "__canonical"); got != "true" {
+		t.Fatalf("canonical prototype check = %q", got)
+	}
+}
 
 func startFetchLoop(t *testing.T) *eventloop.EventLoop {
 	t.Helper()

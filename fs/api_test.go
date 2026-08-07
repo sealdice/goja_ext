@@ -2,6 +2,7 @@ package fs
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,74 @@ import (
 	"github.com/sealdice/goja_ext/require"
 	"github.com/spf13/afero"
 )
+
+func TestEnableAndRequireShareCanonicalCore(t *testing.T) {
+	rt := goja.New()
+	registry := require.NewRegistry()
+	backend := afero.NewMemMapFs()
+	registry.RegisterNativeModule("fs", RequireWithOptions(
+		WithFS(backend),
+		WithCwd("/workspace"),
+	))
+	registry.Enable(rt)
+	if err := Enable(rt, WithFS(backend), WithCwd("/workspace")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := rt.RunString(`
+		fs.mkdirSync("shared", { recursive: true });
+		fs.writeTextFileSync("shared/value.txt", "canonical");
+		fs.chdir("shared");
+		const required = require("fs");
+		required.cwd() + "|" + required.readTextFileSync("value.txt");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "/workspace/shared|canonical" {
+		t.Fatalf("shared value = %q", got)
+	}
+}
+
+func TestRuntimeCoreRejectsConflictingBackend(t *testing.T) {
+	rt := goja.New()
+	first := afero.NewMemMapFs()
+	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+		t.Fatalf("equivalent configuration was rejected: %v", err)
+	}
+	err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	if err == nil || !strings.Contains(err.Error(), "backend") {
+		t.Fatalf("backend conflict error = %v", err)
+	}
+}
+
+func TestRuntimeCoreRejectsConflictingCwdAndChunkSize(t *testing.T) {
+	rt := goja.New()
+	backend := afero.NewMemMapFs()
+	if err := Enable(rt,
+		WithFS(backend),
+		WithCwd("/first"),
+		WithStreamChunkSize(1024),
+	); err != nil {
+		t.Fatal(err)
+	}
+	for name, options := range map[string][]Option{
+		"cwd": {
+			WithFS(backend), WithCwd("/second"), WithStreamChunkSize(1024),
+		},
+		"chunk size": {
+			WithFS(backend), WithCwd("/first"), WithStreamChunkSize(2048),
+		},
+	} {
+		err := Enable(rt, options...)
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s conflict error = %v", name, err)
+		}
+	}
+}
 
 func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {
 	t.Helper()

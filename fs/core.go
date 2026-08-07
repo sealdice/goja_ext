@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ const defaultStreamChunkSize = 64 * 1024
 
 type config struct {
 	backend    afero.Fs
+	backendSet bool
 	cwd        string
 	cwdSet     bool
 	chunkSize  int
@@ -44,6 +46,7 @@ func WithFS(backend afero.Fs) Option {
 			return errors.New("fs: backend must not be nil")
 		}
 		cfg.backend = backend
+		cfg.backendSet = true
 		return nil
 	}
 }
@@ -93,21 +96,30 @@ type Core struct {
 
 // NewCore constructs a runtime-independent Afero FS core.
 func NewCore(opts ...Option) (*Core, error) {
-	cfg := config{
-		backend:   afero.NewOsFs(),
-		chunkSize: defaultStreamChunkSize,
+	cfg, err := configFromOptions(opts)
+	if err != nil {
+		return nil, err
 	}
+	return newCoreFromConfig(cfg)
+}
+
+func configFromOptions(opts []Option) (config, error) {
+	cfg := config{backend: afero.NewOsFs(), chunkSize: defaultStreamChunkSize}
 	for _, opt := range opts {
 		if opt == nil {
 			continue
 		}
 		if err := opt(&cfg); err != nil {
-			return nil, err
+			return config{}, err
 		}
 	}
 	if cfg.backend == nil {
 		cfg.backend = afero.NewOsFs()
 	}
+	return cfg, nil
+}
+
+func newCoreFromConfig(cfg config) (*Core, error) {
 	if !cfg.cwdSet {
 		if _, ok := cfg.backend.(*afero.OsFs); ok {
 			wd, err := os.Getwd()
@@ -124,6 +136,31 @@ func NewCore(opts ...Option) (*Core, error) {
 		cwd:       cfg.cwd,
 		chunkSize: cfg.chunkSize,
 	}, nil
+}
+
+func coreConfigConflict(existing, incoming config) string {
+	if existing.backendSet != incoming.backendSet {
+		return "backend"
+	}
+	if existing.backendSet && !sameBackend(existing.backend, incoming.backend) {
+		return "backend"
+	}
+	if existing.cwdSet != incoming.cwdSet || existing.cwd != incoming.cwd {
+		return "cwd"
+	}
+	if existing.chunkSize != incoming.chunkSize {
+		return "chunk size"
+	}
+	return ""
+}
+
+func sameBackend(left, right afero.Fs) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	lv := reflect.ValueOf(left)
+	rv := reflect.ValueOf(right)
+	return lv.Type() == rv.Type() && lv.Comparable() && rv.Comparable() && lv.Interface() == rv.Interface()
 }
 
 func (c *Core) Backend() afero.Fs {

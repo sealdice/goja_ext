@@ -349,8 +349,7 @@ func newRequestCtor(rt *goja.Runtime) func(call goja.ConstructorCall) *goja.Obje
 		_ = obj.Set("credentials", data.cred)
 		_ = obj.Set("cache", data.cache)
 		_ = obj.Set("redirect", data.redirect)
-		headersObj := rt.NewObject()
-		bindHeaders(rt, headersObj, data.headers)
+		headersObj := newHeadersObject(rt, data.headers)
 		_ = obj.Set("headers", headersObj)
 		_ = obj.Set("body", data.body)
 
@@ -409,8 +408,7 @@ func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, loop *
 	if data.method != "" {
 		_ = obj.Set("method", data.method)
 	}
-	headersObj := rt.NewObject()
-	bindHeaders(rt, headersObj, data.headers)
+	headersObj := newHeadersObject(rt, data.headers)
 	_ = obj.Set("headers", headersObj)
 
 	var bodyStream goja.Value
@@ -447,6 +445,33 @@ func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, loop *
 			return rt.ToValue(rt.NewArrayBuffer(bytes)), nil
 		})
 	})
+}
+
+func newHeadersObject(rt *goja.Runtime, data *headersData) *goja.Object {
+	obj := newCanonicalInstance(rt, "Headers")
+	bindHeaders(rt, obj, data)
+	return obj
+}
+
+func newResponseObject(rt *goja.Runtime, data *responseData, loop *eventloop.EventLoop) *goja.Object {
+	obj := newCanonicalInstance(rt, "Response")
+	bindResponse(rt, obj, data, loop)
+	return obj
+}
+
+func newCanonicalInstance(rt *goja.Runtime, constructorName string) *goja.Object {
+	obj := rt.NewObject()
+	constructor := Exports(rt).Get(constructorName)
+	if constructor == nil || goja.IsUndefined(constructor) || goja.IsNull(constructor) {
+		return obj
+	}
+	prototype := constructor.ToObject(rt).Get("prototype")
+	if prototypeObject, ok := prototype.(*goja.Object); ok {
+		if err := obj.SetPrototype(prototypeObject); err != nil {
+			panic(err)
+		}
+	}
+	return obj
 }
 
 func bytesFromValue(v goja.Value) []byte {

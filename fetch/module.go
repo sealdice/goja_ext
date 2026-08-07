@@ -3,27 +3,47 @@ package fetch
 import (
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 const ModuleName = "fetch"
+
+var exportsKey = runtimehost.NewKey("fetch.exports")
+
+// Exports returns the canonical Fetch API constructors for rt.
+func Exports(rt *goja.Runtime) *goja.Object {
+	value := runtimehost.GetOrCreate(rt, exportsKey, func() any {
+		exports := rt.NewObject()
+		for name, constructor := range map[string]any{
+			"Headers":  newHeadersCtor(rt),
+			"Request":  newRequestCtor(rt),
+			"Response": newResponseCtor(rt),
+			"FormData": newFormDataCtor(rt),
+		} {
+			if err := exports.Set(name, constructor); err != nil {
+				panic(err)
+			}
+		}
+		return exports
+	})
+	return value.(*goja.Object)
+}
 
 // Enable registers Headers, Request, Response and FormData as globals.
 // It does not register fetch itself — fetch needs an event loop and a resty
 // client; use EnableFetch for that.
 func Enable(rt *goja.Runtime) {
-	_ = rt.Set("Headers", newHeadersCtor(rt))
-	_ = rt.Set("Request", newRequestCtor(rt))
-	_ = rt.Set("Response", newResponseCtor(rt))
-	_ = rt.Set("FormData", newFormDataCtor(rt))
+	exports := Exports(rt)
+	for _, name := range []string{"Headers", "Request", "Response", "FormData"} {
+		_ = rt.Set(name, exports.Get(name))
+	}
 }
 
 // Require exports Headers, Request, Response and FormData as the "fetch" module.
 func Require(rt *goja.Runtime, module *goja.Object) {
-	exports := module.Get("exports").(*goja.Object)
-	_ = exports.Set("Headers", newHeadersCtor(rt))
-	_ = exports.Set("Request", newRequestCtor(rt))
-	_ = exports.Set("Response", newResponseCtor(rt))
-	_ = exports.Set("FormData", newFormDataCtor(rt))
+	if err := module.Set("exports", Exports(rt)); err != nil {
+		panic(err)
+	}
 }
 
 func init() {

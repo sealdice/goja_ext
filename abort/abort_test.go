@@ -4,7 +4,27 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/require"
 )
+
+func TestEnableAndRequireShareCanonicalConstructors(t *testing.T) {
+	rt := goja.New()
+	new(require.Registry).Enable(rt)
+	Enable(rt)
+
+	value, err := rt.RunString(`
+		const abort = require("abort");
+		AbortController === abort.AbortController &&
+		AbortSignal === abort.AbortSignal &&
+		require("abort") === abort;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value.ToBoolean() {
+		t.Fatal("global and CommonJS abort constructors are not canonical")
+	}
+}
 
 func newRT(t *testing.T) *goja.Runtime {
 	t.Helper()

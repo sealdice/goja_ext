@@ -73,8 +73,7 @@ func newFetchFn(rt *goja.Runtime, loop *eventloop.EventLoop, client *resty.Clien
 			loop.RunOnLoop(func(loopRT *goja.Runtime) {
 				switch {
 				case err == nil:
-					response := loopRT.NewObject()
-					bindResponse(loopRT, response, responseData, loop)
+					response := newResponseObject(loopRT, responseData, loop)
 					_ = resolve(response)
 				case requestData.abort.get() != nil:
 					_ = reject(requestData.abort.get())
