@@ -32,10 +32,11 @@ func (p *fakeCwdProvider) Chdir(cwd string) error {
 func TestHostIsCanonicalPerRuntime(t *testing.T) {
 	rt1 := goja.New()
 	rt2 := goja.New()
-	if For(rt1) != For(rt1) {
+	first := For(rt1)
+	if first != For(rt1) {
 		t.Fatal("same runtime returned different hosts")
 	}
-	if For(rt1) == For(rt2) {
+	if first == For(rt2) {
 		t.Fatal("different runtimes shared a host")
 	}
 }

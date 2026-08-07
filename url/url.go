@@ -38,7 +38,7 @@ func toURL(r *goja.Runtime, v goja.Value) *nodeURL {
 
 func (m *urlModule) newInvalidURLError(msg, input string) *goja.Object {
 	o := errors.NewTypeError(m.r, "ERR_INVALID_URL", msg)
-	o.Set("input", m.r.ToValue(input))
+	must(o.Set("input", m.r.ToValue(input)))
 	return o
 }
 
@@ -55,7 +55,7 @@ func (m *urlModule) defineURLAccessorProp(p *goja.Object, name string, getter fu
 			return goja.Undefined()
 		})
 	}
-	p.DefineAccessorProperty(name, getterVal, setterVal, goja.FLAG_FALSE, goja.FLAG_TRUE)
+	must(p.DefineAccessorProperty(name, getterVal, setterVal, goja.FLAG_FALSE, goja.FLAG_TRUE))
 }
 
 func valueToURLPort(v goja.Value) (portNum int, empty bool) {
@@ -364,17 +364,17 @@ func (m *urlModule) createURLPrototype() *goja.Object {
 		return m.newURLSearchParams((*urlSearchParams)(u))
 	}, nil)
 
-	p.Set("toString", m.r.ToValue(func(call goja.FunctionCall) goja.Value {
+	must(p.Set("toString", m.r.ToValue(func(call goja.FunctionCall) goja.Value {
 		u := toURL(m.r, call.This)
 		u.syncSearchParams()
 		return m.r.ToValue(u.url.String())
-	}))
+	})))
 
-	p.Set("toJSON", m.r.ToValue(func(call goja.FunctionCall) goja.Value {
+	must(p.Set("toJSON", m.r.ToValue(func(call goja.FunctionCall) goja.Value {
 		u := toURL(m.r, call.This)
 		u.syncSearchParams()
 		return m.r.ToValue(u.url.String())
-	}))
+	})))
 
 	return p
 }
@@ -390,13 +390,13 @@ func (m *urlModule) createURLConstructor() goja.Value {
 			u = m.parseURL(call.Argument(0).String(), true)
 		}
 		res := m.r.ToValue(&nodeURL{url: u}).(*goja.Object)
-		res.SetPrototype(call.This.Prototype())
+		must(res.SetPrototype(call.This.Prototype()))
 		return res
 	}).(*goja.Object)
 
 	proto := m.createURLPrototype()
-	f.Set("prototype", proto)
-	proto.DefineDataProperty("constructor", f, goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	must(f.Set("prototype", proto))
+	must(proto.DefineDataProperty("constructor", f, goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE))
 	return f
 }
 

@@ -2,6 +2,7 @@ package util
 
 import (
 	"bytes"
+
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
 )
@@ -90,8 +91,12 @@ func Require(runtime *goja.Runtime, module *goja.Object) {
 		runtime: runtime,
 	}
 	obj := module.Get("exports").(*goja.Object)
-	obj.Set("format", u.js_format)
-	obj.Set("inspect", Inspect(runtime))
+	if err := obj.Set("format", u.js_format); err != nil {
+		panic(err)
+	}
+	if err := obj.Set("inspect", Inspect(runtime)); err != nil {
+		panic(err)
+	}
 }
 
 func New(runtime *goja.Runtime) *Util {

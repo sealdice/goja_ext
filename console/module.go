@@ -86,17 +86,24 @@ func requireWithPrinter(printer Printer) require.ModuleLoader {
 		c.util = require.Require(runtime, util.ModuleName).(*goja.Object)
 
 		o := module.Get("exports").(*goja.Object)
-		o.Set("log", c.log(c.printer.Log))
-		o.Set("error", c.log(c.printer.Error))
-		o.Set("warn", c.log(c.printer.Warn))
-		o.Set("info", c.log(c.printer.Log))
-		o.Set("debug", c.log(c.printer.Log))
-		o.Set("trace", c.trace)
+		set := func(name string, value interface{}) {
+			if err := o.Set(name, value); err != nil {
+				panic(err)
+			}
+		}
+		set("log", c.log(c.printer.Log))
+		set("error", c.log(c.printer.Error))
+		set("warn", c.log(c.printer.Warn))
+		set("info", c.log(c.printer.Log))
+		set("debug", c.log(c.printer.Log))
+		set("trace", c.trace)
 	}
 }
 
 func Enable(runtime *goja.Runtime) {
-	runtime.Set("console", require.Require(runtime, ModuleName))
+	if err := runtime.Set("console", require.Require(runtime, ModuleName)); err != nil {
+		panic(err)
+	}
 }
 
 func init() {

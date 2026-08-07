@@ -23,12 +23,6 @@ const (
 	defaultEventSourceRetry = 3000
 )
 
-type sseEvent struct {
-	data        string
-	eventType   string
-	lastEventID string
-}
-
 type eventSourceData struct {
 	rt         *goja.Runtime
 	loop       *eventloop.EventLoop
@@ -47,7 +41,7 @@ type eventSourceData struct {
 	listeners   map[string][]goja.Value
 
 	// SSE parser state; only touched by the single pump goroutine.
-	dataBuf strings.Builder
+	dataBuf  strings.Builder
 	curEvent string
 	hasEvent bool
 }
@@ -86,12 +80,6 @@ func (es *eventSourceData) setReadyState(state int) {
 	es.readyState = state
 	es.mu.Unlock()
 	_ = es.obj.Set("readyState", state)
-}
-
-func (es *eventSourceData) getReadyState() int {
-	es.mu.Lock()
-	defer es.mu.Unlock()
-	return es.readyState
 }
 
 func (es *eventSourceData) isClosed() bool {

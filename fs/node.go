@@ -194,7 +194,7 @@ func (m *moduleInstance) rmSync(call goja.FunctionCall) goja.Value {
 	options := objectOrEmpty(m.rt, call.Argument(1))
 	recursive := propertyBool(options, "recursive", false)
 	force := propertyBool(options, "force", false)
-	if err := m.core.Remove(name, recursive); err != nil && !(force && os.IsNotExist(err)) {
+	if err := m.core.Remove(name, recursive); err != nil && (!force || !os.IsNotExist(err)) {
 		panicJSError(m.rt, err)
 	}
 	return goja.Undefined()

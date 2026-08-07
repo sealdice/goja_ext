@@ -765,7 +765,9 @@ func TestFormData_MultipartBody(t *testing.T) {
 			fileName = fh.Filename
 			b, _ := io.ReadAll(f)
 			fileContent = string(b)
-			f.Close()
+			if err := f.Close(); err != nil {
+				t.Error(err)
+			}
 		}
 	}))
 	defer srv.Close()

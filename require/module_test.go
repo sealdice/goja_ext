@@ -38,9 +38,11 @@ func TestRequireNativeModule(t *testing.T) {
 
 	RegisterNativeModule("test/m", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
-		o.Set("test", func(call js.FunctionCall) js.Value {
+		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed")
-		})
+		}); err != nil {
+			panic(err)
+		}
 	})
 
 	v, err := vm.RunString(SCRIPT)
@@ -61,23 +63,29 @@ func TestRegisterCoreModule(t *testing.T) {
 
 	RegisterCoreModule("coremod", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
-		o.Set("test", func(call js.FunctionCall) js.Value {
+		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed")
-		})
+		}); err != nil {
+			panic(err)
+		}
 	})
 
 	RegisterCoreModule("coremod1", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
-		o.Set("test", func(call js.FunctionCall) js.Value {
+		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed1")
-		})
+		}); err != nil {
+			panic(err)
+		}
 	})
 
 	RegisterCoreModule("node:test1", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
-		o.Set("test", func(call js.FunctionCall) js.Value {
+		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("test1 passed")
-		})
+		}); err != nil {
+			panic(err)
+		}
 	})
 
 	registry.RegisterNativeModule("bob", func(runtime *js.Runtime, module *js.Object) {
@@ -140,10 +148,14 @@ func TestRequireRegistryNativeModule(t *testing.T) {
 	logWithOutput := func(w io.Writer, prefix string) ModuleLoader {
 		return func(vm *js.Runtime, module *js.Object) {
 			o := module.Get("exports").(*js.Object)
-			o.Set("print", func(call js.FunctionCall) js.Value {
-				fmt.Fprint(w, prefix, call.Argument(0).String())
+			if err := o.Set("print", func(call js.FunctionCall) js.Value {
+				if _, err := fmt.Fprint(w, prefix, call.Argument(0).String()); err != nil {
+					panic(err)
+				}
 				return js.Undefined()
-			})
+			}); err != nil {
+				panic(err)
+			}
 		}
 	}
 
@@ -226,7 +238,9 @@ func TestRequire(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
 			vm := js.New()
-			vm.Set("testPath", test.path)
+			if err := vm.Set("testPath", test.path); err != nil {
+				t.Fatal(err)
+			}
 
 			registry := new(Registry)
 			registry.Enable(vm)
@@ -489,14 +503,12 @@ func TestSourceMapLoader(t *testing.T) {
 	}
 }
 
-func testsetup() (string, func(), error) {
+func testsetup() (string, func() error, error) {
 	name, err := os.MkdirTemp("", "goja-nodejs-require-test")
 	if err != nil {
 		return "", nil, err
 	}
-	return name, func() {
-		os.RemoveAll(name)
-	}, nil
+	return name, func() error { return os.RemoveAll(name) }, nil
 }
 
 func TestDefaultModuleLoader(t *testing.T) {
@@ -504,7 +516,11 @@ func TestDefaultModuleLoader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer teardown()
+	t.Cleanup(func() {
+		if err := teardown(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	err = os.Chdir(workdir)
 	if err != nil {
@@ -539,7 +555,11 @@ func TestDefaultPathResolver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer teardown()
+	t.Cleanup(func() {
+		if err := teardown(); err != nil {
+			t.Error(err)
+		}
+	})
 
 	err = os.Chdir(workdir)
 	if err != nil {

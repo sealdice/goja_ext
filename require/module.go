@@ -31,10 +31,21 @@ type SourceLoader func(path string) ([]byte, error)
 type PathResolver func(base, path string) string
 
 var (
-	InvalidModuleError          = errors.New("Invalid module")
-	IllegalModuleNameError      = errors.New("Illegal module name")
-	NoSuchBuiltInModuleError    = errors.New("No such built-in module")
-	ModuleFileDoesNotExistError = errors.New("module file does not exist")
+	ErrInvalidModule = errors.New("Invalid module") //nolint:staticcheck // Error text is public compatibility behavior.
+	//nolint:staticcheck // Error text is public compatibility behavior.
+	ErrIllegalModuleName = errors.New("Illegal module name")
+	//nolint:staticcheck // Error text is public compatibility behavior.
+	ErrNoSuchBuiltInModule    = errors.New("No such built-in module")
+	ErrModuleFileDoesNotExist = errors.New("module file does not exist")
+
+	// Deprecated compatibility aliases. Use the Err-prefixed names above.
+	InvalidModuleError = ErrInvalidModule //nolint:staticcheck // Public compatibility alias.
+	//nolint:staticcheck // Public compatibility alias.
+	IllegalModuleNameError = ErrIllegalModuleName
+	//nolint:staticcheck // Public compatibility alias.
+	NoSuchBuiltInModuleError = ErrNoSuchBuiltInModule
+	//nolint:staticcheck // Public compatibility alias.
+	ModuleFileDoesNotExistError = ErrModuleFileDoesNotExist
 )
 
 var native, builtin map[string]ModuleLoader
@@ -113,7 +124,9 @@ func (r *Registry) Enable(runtime *js.Runtime) *RequireModule {
 		nodeModules: make(map[string]*js.Object),
 	}
 
-	runtime.Set("require", rrt.require)
+	if err := runtime.Set("require", rrt.require); err != nil {
+		panic(err)
+	}
 	return rrt
 }
 
@@ -129,7 +142,7 @@ func (r *Registry) RegisterNativeModule(name string, loader ModuleLoader) {
 }
 
 // DefaultSourceLoader is used if none was set (see WithLoader()). It simply loads files from the host's filesystem.
-func DefaultSourceLoader(filename string) ([]byte, error) {
+func DefaultSourceLoader(filename string) (data []byte, err error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -142,7 +155,11 @@ func DefaultSourceLoader(filename string) ([]byte, error) {
 		return nil, err
 	}
 
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 	// On some systems (e.g. plan9 and FreeBSD) it is possible to use the standard read() call on directories
 	// which means we cannot rely on read() returning an error, we have to do stat() instead.
 	if fi, err := f.Stat(); err == nil {

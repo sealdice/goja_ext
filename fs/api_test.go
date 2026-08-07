@@ -271,7 +271,7 @@ func TestDenoRequireWithLoopRunsAsyncOperationsOffLoop(t *testing.T) {
 		Fs:      afero.NewMemMapFs(),
 		release: make(chan struct{}),
 	}
-	if err := backend.Fs.MkdirAll("/workspace", 0o755); err != nil {
+	if err := backend.MkdirAll("/workspace", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	loop := eventloop.NewEventLoop(

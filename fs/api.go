@@ -598,12 +598,16 @@ func (m *moduleInstance) promiseCall(
 	return m.rt.ToValue(promise)
 }
 
-func copyFile(backend afero.Fs, from, to string) error {
+func copyFile(backend afero.Fs, from, to string) (err error) {
 	source, err := backend.Open(from)
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer func() {
+		if closeErr := source.Close(); err == nil {
+			err = closeErr
+		}
+	}()
 	target, err := backend.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666)
 	if err != nil {
 		return err

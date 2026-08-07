@@ -41,8 +41,18 @@ func error_toString(call goja.FunctionCall, r *goja.Runtime) goja.Value {
 }
 
 func addProps(r *goja.Runtime, e *goja.Object, code string) {
-	e.Set("code", code)
-	e.DefineDataProperty("toString", r.ToValue(error_toString), goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_FALSE)
+	if err := e.Set("code", code); err != nil {
+		panic(err)
+	}
+	if err := e.DefineDataProperty(
+		"toString",
+		r.ToValue(error_toString),
+		goja.FLAG_TRUE,
+		goja.FLAG_TRUE,
+		goja.FLAG_FALSE,
+	); err != nil {
+		panic(err)
+	}
 }
 
 func NewTypeError(r *goja.Runtime, code string, params ...interface{}) *goja.Object {

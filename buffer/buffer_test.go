@@ -175,7 +175,9 @@ func TestWrapBytes(t *testing.T) {
 	new(require.Registry).Enable(vm)
 	b := []byte{1, 2, 3}
 	buffer := GetApi(vm)
-	vm.Set("b", buffer.WrapBytes(b))
+	if err := vm.Set("b", buffer.WrapBytes(b)); err != nil {
+		t.Fatal(err)
+	}
 	Enable(vm)
 	_, err := vm.RunString(`
 		if (typeof Buffer !== "function") {

@@ -27,8 +27,7 @@ func TestProcessEnvStructure(t *testing.T) {
 }
 
 func TestProcessEnvValuesArtificial(t *testing.T) {
-	os.Setenv("GOJA_IS_AWESOME", "true")
-	defer os.Unsetenv("GOJA_IS_AWESOME")
+	t.Setenv("GOJA_IS_AWESOME", "true")
 
 	vm := goja.New()
 

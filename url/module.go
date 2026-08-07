@@ -14,21 +14,27 @@ type urlModule struct {
 	URLSearchParamsIteratorPrototype *goja.Object
 }
 
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 func Require(runtime *goja.Runtime, module *goja.Object) {
 	exports := module.Get("exports").(*goja.Object)
 	m := &urlModule{
 		r: runtime,
 	}
-	exports.Set("URL", m.createURLConstructor())
-	exports.Set("URLSearchParams", m.createURLSearchParamsConstructor())
-	exports.Set("domainToASCII", m.domainToASCII)
-	exports.Set("domainToUnicode", m.domainToUnicode)
+	must(exports.Set("URL", m.createURLConstructor()))
+	must(exports.Set("URLSearchParams", m.createURLSearchParamsConstructor()))
+	must(exports.Set("domainToASCII", m.domainToASCII))
+	must(exports.Set("domainToUnicode", m.domainToUnicode))
 }
 
 func Enable(runtime *goja.Runtime) {
 	m := require.Require(runtime, ModuleName).ToObject(runtime)
-	runtime.Set("URL", m.Get("URL"))
-	runtime.Set("URLSearchParams", m.Get("URLSearchParams"))
+	must(runtime.Set("URL", m.Get("URL")))
+	must(runtime.Set("URLSearchParams", m.Get("URLSearchParams")))
 }
 
 func init() {

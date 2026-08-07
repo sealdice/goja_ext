@@ -98,7 +98,7 @@ func TestWebSocketTLSDefaultsToVerification(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -210,6 +210,13 @@ func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 	t.Fatal("timeout waiting for condition")
 }
 
+func closeTestConnection(t *testing.T, connection *websocket.Conn) {
+	t.Helper()
+	if err := connection.Close(); err != nil {
+		t.Logf("close test websocket: %v", err)
+	}
+}
+
 func TestWebSocketBasicMessage(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -217,7 +224,7 @@ func TestWebSocketBasicMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("hello-ws"))
 	}))
 	defer srv.Close()
@@ -228,7 +235,10 @@ func TestWebSocketBasicMessage(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, err := vm.RunString(`globalThis.__wsMsg = ""; globalThis.__wsErr = "";`)
 		if err != nil {
 			t.Fatalf("init ws globals failed: %v", err)
@@ -272,7 +282,10 @@ func TestWebSocketReadyStateConstants(t *testing.T) {
 	var got string
 	var runErr error
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		v, err := vm.RunString(`JSON.stringify([WebSocket.CONNECTING, WebSocket.OPEN, WebSocket.CLOSING, WebSocket.CLOSED])`)
 		if err != nil {
 			runErr = err
@@ -295,7 +308,7 @@ func TestWebSocketBinaryMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.BinaryMessage, []byte{1, 2, 3})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -311,7 +324,10 @@ func TestWebSocketBinaryMessage(t *testing.T) {
 
 	var binErr, binVal, binKind string
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`globalThis.__bin = ""; globalThis.__kind = ""; globalThis.__err = "";`)
 		_, _ = vm.RunString(`
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -359,7 +375,7 @@ func TestWebSocketAddRemoveEventListener(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("ping"))
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -375,7 +391,10 @@ func TestWebSocketAddRemoveEventListener(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__c1 = 0; globalThis.__c2 = 0; globalThis.__err1 = "";
 			const ws = new WebSocket("` + url + `");
@@ -476,7 +495,7 @@ func TestWebSocketCloseWithCodeReason(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -490,7 +509,10 @@ func TestWebSocketCloseWithCodeReason(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__hasExpected = false;
 			globalThis.__closeCount = 0;
@@ -548,7 +570,10 @@ func TestWebSocketConnectError(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__err = ""; globalThis.__opened = false;
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -592,7 +617,7 @@ func TestWebSocketSendNotOpen(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -606,7 +631,10 @@ func TestWebSocketSendNotOpen(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__err = "";
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -645,7 +673,7 @@ func TestWebSocketProtocolNegotiation(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -660,7 +688,10 @@ func TestWebSocketProtocolNegotiation(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__proto1 = ""; globalThis.__err1 = "";
 			const ws = new WebSocket("` + url + `", ["chat", "json"]);
@@ -722,7 +753,7 @@ func TestWebSocketConnManagerLifecycle(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -737,7 +768,10 @@ func TestWebSocketConnManagerLifecycle(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__opened = 0; globalThis.__err = "";
 			const mk = () => {

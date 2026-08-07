@@ -381,9 +381,7 @@ func (c *Core) ResolvePath(input string) string {
 	if input == "" {
 		return c.Cwd()
 	}
-	if strings.HasPrefix(input, "file://") {
-		input = strings.TrimPrefix(input, "file://")
-	}
+	input = strings.TrimPrefix(input, "file://")
 	if path.IsAbs(input) {
 		return path.Clean(input)
 	}
