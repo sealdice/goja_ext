@@ -7,9 +7,28 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/runtimehost"
 
 	"go.uber.org/goleak"
 )
+
+func TestEventLoopBindsRuntimeHostScheduler(t *testing.T) {
+	loop := NewEventLoop(EnableConsole(false))
+	defer loop.Stop()
+	if loop.Runtime() == nil {
+		t.Fatal("event loop returned a nil runtime")
+	}
+	if !loop.Owns(loop.Runtime()) {
+		t.Fatal("event loop does not own its runtime")
+	}
+	if loop.Owns(goja.New()) {
+		t.Fatal("event loop claims a different runtime")
+	}
+	scheduler, ok := runtimehost.SchedulerFor(loop.Runtime())
+	if !ok || scheduler != loop {
+		t.Fatal("event loop is not the runtime host scheduler")
+	}
+}
 
 func TestRun(t *testing.T) {
 	t.Parallel()

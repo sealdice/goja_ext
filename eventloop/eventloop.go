@@ -37,6 +37,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/console"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 // Logger is a simple logging interface that can be implemented by any logging library.
@@ -137,6 +138,9 @@ func NewEventLoop(opts ...Option) *EventLoop {
 	for _, opt := range opts {
 		opt(loop)
 	}
+	if err := runtimehost.BindScheduler(vm, loop); err != nil {
+		panic(err)
+	}
 
 	if loop.registry == nil {
 		loop.registry = new(require.Registry)
@@ -175,6 +179,20 @@ func NewEventLoop(opts ...Option) *EventLoop {
 	})
 
 	return loop
+}
+
+// Runtime returns the runtime owned by the event loop. Callers must still use
+// Run or RunOnLoop for every operation that touches this runtime.
+func (loop *EventLoop) Runtime() *goja.Runtime {
+	if loop == nil {
+		return nil
+	}
+	return loop.vm
+}
+
+// Owns reports whether rt is the runtime serialized by this event loop.
+func (loop *EventLoop) Owns(rt *goja.Runtime) bool {
+	return loop != nil && loop.vm == rt
 }
 
 type Option func(*EventLoop)
