@@ -122,6 +122,7 @@ func TestNodeWritableFromWeb(t *testing.T) {
 		const stream = require("stream");
 		const { WritableStream } = require("streams");
 		const collected = [];
+		let finished = false;
 		const web = new WritableStream({
 			write(chunk) { collected.push(String(chunk)); return Promise.resolve(); },
 			close() { return Promise.resolve(); },
@@ -129,13 +130,15 @@ func TestNodeWritableFromWeb(t *testing.T) {
 		const w = stream.Writable.fromWeb(web);
 		w.write("hi");
 		w.end();
+		w.on("finish", function () { finished = true; });
 		let p = Promise.resolve();
-		for (let i = 0; i < 10; i++) p = p.then(function () {});
+		for (let i = 0; i < 20; i++) p = p.then(function () {});
 		p.then(function () {
-			globalThis.__result = collected.join("|");
+			globalThis.__result = collected.join("|") + "|finish=" + finished;
 		});
 	`)
-	if result != "hi" {
+	// Before the bridge.js write-signature fix, data arrived but 'finish' never fired.
+	if result != "hi|finish=true" {
 		t.Fatalf("unexpected Writable.fromWeb result: %s", result)
 	}
 }

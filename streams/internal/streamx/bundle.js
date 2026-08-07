@@ -2244,7 +2244,7 @@ var require_bridge = __commonJS({
     function writableFromWeb(webStream, opts) {
       const writer = webStream.getWriter();
       const writable = new stream2.Writable({
-        write(data, enc, cb) {
+        write(data, cb) {
           writer.write(data).then(function() {
             cb(null);
           }, function(err) {
@@ -2284,8 +2284,8 @@ var require_bridge = __commonJS({
             cb(null);
           }
         },
-        write(data, enc, cb) {
-          writable.write(data, enc, cb);
+        write(data, cb) {
+          writable.write(data, cb);
         }
       });
       if (opts.signal) addAbortSignal2(opts.signal, duplex);

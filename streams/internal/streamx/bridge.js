@@ -65,7 +65,7 @@ function readableFromWeb(webStream, opts) {
 function writableFromWeb(webStream, opts) {
   const writer = webStream.getWriter()
   const writable = new stream.Writable({
-    write(data, enc, cb) {
+    write(data, cb) {
       writer.write(data).then(function () { cb(null) }, function (err) { cb(err) })
     },
     final(cb) {
@@ -96,8 +96,8 @@ function duplexFromWeb(readableStream, writableStream, opts) {
         cb(null)
       }
     },
-    write(data, enc, cb) {
-      writable.write(data, enc, cb)
+    write(data, cb) {
+      writable.write(data, cb)
     }
   })
   if (opts.signal) addAbortSignal(opts.signal, duplex)
