@@ -10,7 +10,12 @@ Goja 兼容的 Node `process` 模块（当前为最小实现）。
 ## 能力
 
 - `process.env`：宿主环境变量映射（`os.Environ()` 快照）。
+- `process.cwd()` / `process.chdir(path)`：读写 runtime-local cwd。若 FS 已
+  安装，两者复用同一个 FS provider 并验证目录是否存在；不会调用
+  `os.Chdir`，因此不同 runtime 和宿主进程互不影响。
+- 全局 `process` 与 `require("process")` 返回同一个 canonical 对象。
 
 ## 说明
 
-当前仅提供 `env`。`process.nextTick`、`process.cwd`、`process.argv`、`process.platform` 等尚未实现；streamx 依赖的 `nextTick` 由 eventloop 安装的全局 `queueMicrotask` 取代。
+当前 portable subset 不含 `process.nextTick`、`argv`、`platform` 等进程
+控制信息。streamx 使用私有注入的 microtask 函数，不依赖 process。

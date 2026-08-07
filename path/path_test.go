@@ -1,10 +1,14 @@
 package path
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/dop251/goja"
+	rootfs "github.com/sealdice/goja_ext/fs"
+	_ "github.com/sealdice/goja_ext/process"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/spf13/afero"
 )
 
 func run(t *testing.T, script string) string {
@@ -175,11 +179,58 @@ func TestPathWin32BasenameExt(t *testing.T) {
 func TestPathWin32SepDelimiter(t *testing.T) {
 	out := run(t, `
 		const w = require("path").win32;
-		JSON.stringify([w.sep(), w.delimiter()]);
+		JSON.stringify([w.sep, w.delimiter, typeof w.sep, typeof w.delimiter]);
 	`)
-	want := `["\\",";"]`
+	want := `["\\",";","string","string"]`
 	if out != want {
 		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestDefaultPathFunctionsMatchHostPlatform(t *testing.T) {
+	out := run(t, `
+		const p = require("path");
+		JSON.stringify([
+			p.resolve === p.win32.resolve,
+			p.resolve === p.posix.resolve,
+			p.sep,
+			p.delimiter
+		]);
+	`)
+	want := `[false,true,"/",":"]`
+	if runtime.GOOS == "windows" {
+		want = `[true,false,"\\",";"]`
+	}
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathFsAndProcessShareDynamicRuntimeCwd(t *testing.T) {
+	rt := goja.New()
+	registry := require.NewRegistry()
+	rootfs.RegisterWithOptions(registry,
+		rootfs.WithFS(afero.NewMemMapFs()),
+		rootfs.WithCwd("/workspace"),
+	)
+	registry.Enable(rt)
+	value, err := rt.RunString(`
+		const p = require("path");
+		const fs = require("fs");
+		const process = require("process");
+		const before = p.resolve("file.txt");
+		fs.mkdirSync("next", { recursive: true });
+		fs.chdir("next");
+		const afterFs = [p.resolve("file.txt"), process.cwd(), fs.cwd()];
+		process.chdir("..");
+		JSON.stringify([before, afterFs, p.resolve("file.txt"), fs.cwd()]);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["/workspace/file.txt",["/workspace/next/file.txt","/workspace/next","/workspace/next"],"/workspace/file.txt","/workspace"]`
+	if got := value.String(); got != want {
+		t.Fatalf("shared cwd result = %s, want %s", got, want)
 	}
 }
 

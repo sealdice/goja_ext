@@ -3,7 +3,7 @@ package path
 import "strings"
 
 type win32Impl struct {
-	hostCwd string
+	cwd func() string
 }
 
 func (win32Impl) sep() string       { return winSep }
@@ -106,7 +106,7 @@ func (w win32Impl) resolve(parts []string) string {
 	var resolved string
 	absolute := false
 	for i := len(parts) - 1; i >= -1 && !absolute; i-- {
-		part := w.hostCwd
+		part := w.cwd()
 		if i >= 0 {
 			part = parts[i]
 		}

@@ -3,6 +3,7 @@ package process
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,5 +65,34 @@ func TestProcessEnvValuesBrackets(t *testing.T) {
 		if jsRes.String() != envKeyValue[1] {
 			t.Fatalf("Error executing %s: got %s but expected %s", jsExpr, jsRes, envKeyValue[1])
 		}
+	}
+}
+
+func TestProcessCwdIsRuntimeLocal(t *testing.T) {
+	hostCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+	Enable(vm)
+	if err := vm.Set("target", target); err != nil {
+		t.Fatal(err)
+	}
+	value, err := vm.RunString(`
+		const same = require("process") === process;
+		process.chdir(target);
+		JSON.stringify([same, process.cwd()]);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[true,"` + filepath.ToSlash(target) + `"]`
+	if got := value.String(); got != want {
+		t.Fatalf("runtime cwd result = %s, want %s", got, want)
+	}
+	if current, err := os.Getwd(); err != nil || current != hostCwd {
+		t.Fatalf("host cwd changed to %q (err=%v), want %q", current, err, hostCwd)
 	}
 }
