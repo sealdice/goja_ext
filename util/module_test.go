@@ -159,3 +159,106 @@ func TestUtil_Inspect_UndefinedOrNullOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestInspect_DepthOption(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
+
+	cases := []struct {
+		name  string
+		depth int
+		want  string
+	}{
+		{"depth0", 0, `{ 'a': [Object] }`},
+		{"depth1", 1, `{ 'a': { 'b': [Object] } }`},
+		{"depthUnlimited", -1, `{ 'a': { 'b': { 'c': 1 } } }`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			val, err := vm.RunString(`({a:{b:{c:1}}})`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := inspect(utilExports, val, vm.ToValue(map[string]int{"depth": c.depth}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.String() != c.want {
+				t.Fatalf("inspect(_, {depth:%d}): got %q want %q", c.depth, res.String(), c.want)
+			}
+		})
+	}
+}
+
+func TestInspect_Functions(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
+
+	cases := []struct {
+		name string
+		js   string
+		want string
+	}{
+		{"named", `(function foo(){})`, "[Function: foo]"},
+		{"arrow", `(()=>{})`, "[Function (anonymous)]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			val, err := vm.RunString(c.js)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := inspect(utilExports, val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.String() != c.want {
+				t.Fatalf("inspect(%s): got %q want %q", c.js, res.String(), c.want)
+			}
+		})
+	}
+}
+
+func TestInspect_NumbersAndEmpty(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
+
+	cases := []struct {
+		name string
+		js   string
+		want string
+	}{
+		{"int", `42`, "42"},
+		{"float", `3.14`, "3.14"},
+		{"empty array", `[]`, "[]"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			val, err := vm.RunString(c.js)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := inspect(utilExports, val)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.String() != c.want {
+				t.Fatalf("inspect(%s): got %q want %q", c.js, res.String(), c.want)
+			}
+		})
+	}
+
+	res, err := inspect(utilExports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.String() != "undefined" {
+		t.Fatalf("inspect(): got %q want undefined", res.String())
+	}
+}

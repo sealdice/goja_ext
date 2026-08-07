@@ -92,3 +92,80 @@ func TestStringDecoderInvalidEncoding(t *testing.T) {
 		t.Fatal("expected error for invalid encoding")
 	}
 }
+
+func TestStringDecoder_FillLast(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const d = new StringDecoder("utf8");
+		const r = d.fillLast(Buffer.from([0xE4, 0xBD]));
+		const after = d.text(Buffer.from([0x41]));
+		JSON.stringify([r, after]);
+	`)
+	want := `["�","A"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestStringDecoder_NonUTF8EndText(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const d = new StringDecoder("hex");
+		const e = d.end(Buffer.from([0x48]));
+		const x = d.text(Buffer.from([0x48]));
+		JSON.stringify([e, x]);
+	`)
+	want := `["48","48"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestStringDecoder_EncodingAliases(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const cases = [
+			["utf-8","utf8"], ["UTF-8","utf8"], [" utf8 ","utf8"],
+			["ascii","ascii"], ["ASCII","ascii"],
+			["latin1","latin1"], ["Latin1","latin1"], ["binary","latin1"],
+			["base64","base64"], ["BASE64","base64"],
+			["ucs2","ucs2"], ["ucs-2","ucs2"], ["utf16le","ucs2"], ["utf-16le","ucs2"],
+			["UTF16LE","ucs2"], ["  UCS2  ","ucs2"]
+		];
+		const bad = cases.filter(([alias, want]) => {
+			try { return new StringDecoder(alias).encoding !== want; }
+			catch (e) { return true; }
+		}).map(([alias]) => alias);
+		JSON.stringify(bad);
+	`)
+	if out != `[]` {
+		t.Fatalf("unexpected or failed aliases: %s", out)
+	}
+}
+
+func TestStringDecoder_DefaultConstructor(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const a = new StringDecoder();
+		const b = new StringDecoder(null);
+		const c = new StringDecoder(undefined);
+		JSON.stringify([a.encoding, b.encoding, c.encoding]);
+	`)
+	want := `["utf8","utf8","utf8"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestStringDecoder_MidStreamInvalidByte(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const d = new StringDecoder("utf8");
+		const r = d.write(Buffer.from([0xFF, 0xE4, 0xBD, 0xA0]));
+		JSON.stringify([r]);
+	`)
+	want := `["�你"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
