@@ -9,6 +9,7 @@ require (
 	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/gorilla/websocket v1.5.3
+	github.com/spf13/afero v1.9.5
 	go.uber.org/goleak v1.3.0
 	golang.org/x/net v0.33.0
 	golang.org/x/text v0.21.0
