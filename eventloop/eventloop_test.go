@@ -71,7 +71,10 @@ func TestRun(t *testing.T) {
 	}
 	startTime := time.Now()
 	loop.Run(func(vm *goja.Runtime) {
-		vm.Set("now", time.Now)
+		if setErr := vm.Set("now", time.Now); setErr != nil {
+			err = setErr
+			return
+		}
 		_, err = vm.RunProgram(prg)
 	})
 	if err != nil {
@@ -111,13 +114,19 @@ func TestStart(t *testing.T) {
 	loop.Start()
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
-		vm.Set("now", time.Now)
-		vm.RunProgram(prg)
+		if setErr := vm.Set("now", time.Now); setErr != nil {
+			err = setErr
+			return
+		}
+		_, err = vm.RunProgram(prg)
 	})
 
 	time.Sleep(2 * time.Second)
 	if remainingJobs := loop.Stop(); remainingJobs != 0 {
 		t.Fatal(remainingJobs)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var calledAt time.Time
@@ -154,13 +163,19 @@ func TestStartInForeground(t *testing.T) {
 	go loop.StartInForeground()
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
-		vm.Set("now", time.Now)
-		vm.RunProgram(prg)
+		if setErr := vm.Set("now", time.Now); setErr != nil {
+			err = setErr
+			return
+		}
+		_, err = vm.RunProgram(prg)
 	})
 
 	time.Sleep(2 * time.Second)
 	if remainingJobs := loop.Stop(); remainingJobs != 0 {
 		t.Fatal(remainingJobs)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var calledAt time.Time
@@ -340,11 +355,17 @@ func TestClearIntervalRace(t *testing.T) {
 	}
 	// Should not hang
 	loop.Run(func(vm *goja.Runtime) {
-		vm.Set("sleep", func(ms int) {
+		if setErr := vm.Set("sleep", func(ms int) {
 			<-time.After(time.Duration(ms) * time.Millisecond)
-		})
-		vm.RunProgram(prg)
+		}); setErr != nil {
+			err = setErr
+			return
+		}
+		_, err = vm.RunProgram(prg)
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestNativeTimeout(t *testing.T) {
@@ -558,11 +579,17 @@ func TestPromiseNative(t *testing.T) {
 	defer loop.Stop()
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
-		vm.Set("done", func() {
+		if setErr := vm.Set("done", func() {
 			ch <- nil
-		})
+		}); setErr != nil {
+			ch <- setErr
+			return
+		}
 		p, resolve, _ := vm.NewPromise()
-		vm.Set("p", p)
+		if setErr := vm.Set("p", p); setErr != nil {
+			ch <- setErr
+			return
+		}
 		_, err = vm.RunProgram(prg)
 		if err != nil {
 			ch <- err
@@ -571,7 +598,9 @@ func TestPromiseNative(t *testing.T) {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			loop.RunOnLoop(func(*goja.Runtime) {
-				resolve("passed")
+				if resolveErr := resolve("passed"); resolveErr != nil {
+					ch <- resolveErr
+				}
 			})
 		}()
 	})
@@ -682,6 +711,30 @@ func TestEventLoop_Terminate(t *testing.T) {
 	}
 	<-ch
 	loop.Terminate()
+}
+
+func TestEventLoopTerminateWaitsForIntervalWorkers(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	loop := NewEventLoop(EnableConsole(false))
+	for range 25 {
+		loop.Start()
+		if loop.SetInterval(func(*goja.Runtime) {}, time.Millisecond) == nil {
+			t.Fatal("SetInterval() failed")
+		}
+
+		registered := make(chan struct{})
+		if !loop.RunOnLoop(func(*goja.Runtime) { close(registered) }) {
+			t.Fatal("RunOnLoop() failed")
+		}
+		<-registered
+
+		loop.Terminate()
+		loop.Run(func(*goja.Runtime) {})
+		if remaining := loop.Stop(); remaining != 0 {
+			t.Fatalf("restart retained %d jobs", remaining)
+		}
+	}
 }
 
 func TestQueueMicrotaskOrderAndInterleave(t *testing.T) {

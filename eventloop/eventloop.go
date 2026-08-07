@@ -103,6 +103,7 @@ type EventLoop struct {
 
 	stopLock   sync.Mutex
 	stopCond   *sync.Cond
+	workerWG   sync.WaitGroup
 	running    bool
 	terminated bool
 
@@ -275,7 +276,8 @@ func (loop *EventLoop) GetPanicCount() int64 {
 	return atomic.LoadInt64(&loop.panicCount)
 }
 
-// reinitializeContext creates new context for restart after termination
+// reinitializeContext creates new context for restart after termination.
+// The caller must hold auxJobsLock.
 func (loop *EventLoop) reinitializeContext() {
 	loop.cancel()
 	loop.ctx, loop.cancel = context.WithCancel(context.Background())
@@ -438,10 +440,13 @@ func (loop *EventLoop) setRunning() {
 		panic("Loop is already started")
 	}
 
-	// Reinitialize context if terminated
+	// Reinitialize context if terminated. addAuxJob uses the same lock, so no
+	// worker can observe a partially reset lifecycle state.
+	loop.auxJobsLock.Lock()
 	if loop.terminated {
 		loop.reinitializeContext()
 	}
+	loop.auxJobsLock.Unlock()
 
 	atomic.StoreInt32(&loop.canRun, 1)
 	loop.running = true
@@ -535,12 +540,20 @@ func (loop *EventLoop) Terminate() {
 		job := loop.jobs[i]
 		if !job.cancelled {
 			job.cancelled = true
-			if job.cancel() {
-				loop.removeJob(job)
-				i--
+			if job.cancel != nil {
+				_ = job.cancel()
 			}
+			if job.refed {
+				loop.jobCount--
+			}
+			loop.removeJob(job)
+			i--
 		}
 	}
+
+	// Interval workers are stopped by the cancellation loop above. Wait until
+	// they have observed their stop signal before making restart possible.
+	loop.workerWG.Wait()
 
 	// After all jobs are cancelled, drain jobChan with non-blocking select to prevent deadlock
 	select {
@@ -638,7 +651,11 @@ func (loop *EventLoop) wakeup() {
 
 // submitTask submits a task to the ants pool for unified concurrency control
 func (loop *EventLoop) submitTask(task func()) {
-	go loop.safeExecute("task", task)
+	loop.workerWG.Add(1)
+	go func() {
+		defer loop.workerWG.Done()
+		loop.safeExecute("task", task)
+	}()
 }
 
 func (loop *EventLoop) addAuxJob(fn func()) bool {
