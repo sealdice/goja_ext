@@ -350,18 +350,23 @@ func TestWebSocketCloseWithCodeReason(t *testing.T) {
 		})
 		return fin
 	})
-	_ = errText
 	var closeCount int64
 	var hasExpected bool
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
 		closeCount = vm.Get("__closeCount").ToInteger()
 		hasExpected = vm.Get("__hasExpected").ToBoolean()
+		errText = vm.Get("__err").String()
 	})
-	if closeCount < 1 {
-		t.Fatalf("onclose did not fire, closeCount=%d", closeCount)
+	// After the close-dispatch fix: close fires exactly once (code 1000) and the
+	// normal 1000 close no longer mis-triggers onerror.
+	if closeCount != 1 {
+		t.Fatalf("onclose should fire exactly once, got closeCount=%d", closeCount)
 	}
 	if !hasExpected {
-		t.Fatalf("expected a close event with code=1000 reason=\"bye\" wasClean=true; closeCount=%d", closeCount)
+		t.Fatalf("expected a single close event with code=1000 reason=\"bye\" wasClean=true")
+	}
+	if errText != "" {
+		t.Fatalf("normal close should not trigger onerror, got err=%q", errText)
 	}
 }
 
