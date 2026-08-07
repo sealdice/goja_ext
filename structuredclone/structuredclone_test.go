@@ -1,9 +1,11 @@
 package structuredclone
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/require"
 )
 
 func TestStructuredClone_PrimitivesAndContainers(t *testing.T) {
@@ -126,5 +128,98 @@ func TestStructuredClone_CircularInsideMap(t *testing.T) {
 	}
 	if !rt.Get("__ok").ToBoolean() {
 		t.Fatal("circular references inside Map not preserved")
+	}
+}
+
+func TestStructuredClone_NoArgThrows(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	_, err := rt.RunString("structuredClone()")
+	if err == nil {
+		t.Fatal("expected TypeError for missing argument")
+	}
+	if !strings.Contains(err.Error(), "value argument is required") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestStructuredClone_UndefinedAndNull(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	v, err := rt.RunString(`JSON.stringify([typeof structuredClone(undefined), structuredClone(null)])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["undefined",null]`
+	if v.String() != want {
+		t.Fatalf("got %s want %s", v.String(), want)
+	}
+}
+
+func TestStructuredClone_CircularSet(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	_, err := rt.RunString(`
+		const s = new Set();
+		const inner = { n: 1 };
+		inner.s = s;
+		s.add(inner);
+		s.add(s);
+		const c = structuredClone(s);
+		let found = null;
+		for (const v of c) {
+			if (v !== c && v !== null && typeof v === "object" && v.n === 1) { found = v; }
+		}
+		globalThis.__ok = (c instanceof Set) && (c.size === 2) && (found !== null) && (found.s === c);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rt.Get("__ok").ToBoolean() {
+		t.Fatal("circular references inside Set not preserved")
+	}
+}
+
+func TestStructuredClone_InvalidDate(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	v, err := rt.RunString(`
+		const d = new Date(NaN);
+		const c = structuredClone(d);
+		JSON.stringify([c instanceof Date, Number.isNaN(c.getTime())])
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.String() != `[true,true]` {
+		t.Fatalf("got %s", v.String())
+	}
+}
+
+func TestStructuredClone_JSONCloneFallback(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	if _, err := rt.RunString(`structuredClone(/abc/)`); err != nil {
+		t.Fatalf("regexp clone should not throw: %v", err)
+	}
+	if _, err := rt.RunString(`structuredClone(() => {})`); err != nil {
+		t.Fatalf("function clone should not throw: %v", err)
+	}
+}
+
+func TestStructuredClone_RequireExport(t *testing.T) {
+	rt := goja.New()
+	registry := new(require.Registry)
+	registry.Enable(rt)
+	v, err := rt.RunString(`
+		const sc = require("structuredclone");
+		JSON.stringify([typeof sc.structuredClone, sc.structuredClone(5)])
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `["function",5]`
+	if v.String() != want {
+		t.Fatalf("got %s want %s", v.String(), want)
 	}
 }
