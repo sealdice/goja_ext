@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/dop251/goja_nodejs/errors"
+	"github.com/sealdice/goja_ext/errors"
 
 	"github.com/dop251/goja"
 )

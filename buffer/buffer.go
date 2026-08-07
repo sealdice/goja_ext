@@ -11,9 +11,9 @@ import (
 	"strconv"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/errors"
-	"github.com/dop251/goja_nodejs/goutil"
-	"github.com/dop251/goja_nodejs/require"
+	"github.com/sealdice/goja_ext/errors"
+	"github.com/sealdice/goja_ext/goutil"
+	"github.com/sealdice/goja_ext/require"
 
 	"github.com/dop251/base64dec"
 	"golang.org/x/text/encoding/unicode"

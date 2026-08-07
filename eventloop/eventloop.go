@@ -35,8 +35,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/console"
-	"github.com/dop251/goja_nodejs/require"
+	"github.com/sealdice/goja_ext/console"
+	"github.com/sealdice/goja_ext/require"
 )
 
 // Logger is a simple logging interface that can be implemented by any logging library.
@@ -151,6 +151,28 @@ func NewEventLoop(opts ...Option) *EventLoop {
 	_ = vm.Set("clearTimeout", loop.clearTimeout)
 	_ = vm.Set("clearInterval", loop.clearInterval)
 	_ = vm.Set("clearImmediate", loop.clearImmediate)
+	_ = vm.Set("queueMicrotask", func(call goja.FunctionCall) goja.Value {
+		fn := call.Argument(0)
+		if _, ok := goja.AssertFunction(fn); !ok {
+			panic(vm.NewTypeError("queueMicrotask expects a function"))
+		}
+		resolveFn, ok := goja.AssertFunction(vm.Get("Promise").ToObject(vm).Get("resolve"))
+		if !ok {
+			return goja.Undefined()
+		}
+		promise, err := resolveFn(vm.Get("Promise").ToObject(vm))
+		if err != nil {
+			panic(err)
+		}
+		thenFn, ok := goja.AssertFunction(promise.ToObject(vm).Get("then"))
+		if !ok {
+			return goja.Undefined()
+		}
+		if _, err := thenFn(promise.ToObject(vm), fn); err != nil {
+			panic(err)
+		}
+		return goja.Undefined()
+	})
 
 	return loop
 }
@@ -616,13 +638,13 @@ func (loop *EventLoop) RequireModule(modulePath string) (goja.Value, error) {
 	if loop.jsRequire == nil {
 		return nil, errors.New("require module not initialized")
 	}
-	
+
 	// Use a channel to synchronously wait for the result
 	resultChan := make(chan struct {
 		value goja.Value
 		err   error
 	}, 1)
-	
+
 	// Schedule the require operation on the event loop
 	scheduled := loop.RunOnLoop(func(vm *goja.Runtime) {
 		module, err := loop.jsRequire.Require(modulePath)
@@ -631,11 +653,11 @@ func (loop *EventLoop) RequireModule(modulePath string) (goja.Value, error) {
 			err   error
 		}{module, err}
 	})
-	
+
 	if !scheduled {
 		return nil, errors.New("event loop is terminated")
 	}
-	
+
 	// Wait for the result
 	result := <-resultChan
 	return result.value, result.err

@@ -3,7 +3,7 @@ package util
 import (
 	"bytes"
 	"github.com/dop251/goja"
-	"github.com/dop251/goja_nodejs/require"
+	"github.com/sealdice/goja_ext/require"
 )
 
 const ModuleName = "util"
@@ -91,6 +91,7 @@ func Require(runtime *goja.Runtime, module *goja.Object) {
 	}
 	obj := module.Get("exports").(*goja.Object)
 	obj.Set("format", u.js_format)
+	obj.Set("inspect", Inspect(runtime))
 }
 
 func New(runtime *goja.Runtime) *Util {

@@ -639,3 +639,74 @@ func TestEventLoop_Terminate(t *testing.T) {
 	<-ch
 	loop.Terminate()
 }
+
+func TestQueueMicrotaskOrderAndInterleave(t *testing.T) {
+	t.Parallel()
+	loop := NewEventLoop(EnableConsole(false))
+	defer loop.Stop()
+	var runErr error
+	loop.Run(func(vm *goja.Runtime) {
+		_, runErr = vm.RunString(`
+			var order = [];
+			queueMicrotask(function () { order.push("qm1"); });
+			Promise.resolve().then(function () { order.push("p1"); });
+			queueMicrotask(function () { order.push("qm2"); });
+			Promise.resolve().then(function () { order.push("p2"); });
+			globalThis.__order = order;
+		`)
+	})
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	var result string
+	loop.Run(func(vm *goja.Runtime) {
+		result = vm.Get("__order").String()
+	})
+	if result != "qm1,p1,qm2,p2" {
+		t.Fatalf("unexpected order: %s", result)
+	}
+}
+
+func TestQueueMicrotaskRequiresFunction(t *testing.T) {
+	t.Parallel()
+	loop := NewEventLoop(EnableConsole(false))
+	defer loop.Stop()
+	var runErr error
+	loop.Run(func(vm *goja.Runtime) {
+		_, runErr = vm.RunString(`queueMicrotask(42);`)
+	})
+	if runErr == nil {
+		t.Fatal("expected TypeError")
+	}
+}
+
+func TestQueueMicrotaskWithinTimeout(t *testing.T) {
+	t.Parallel()
+	loop := NewEventLoop(EnableConsole(false))
+	defer loop.Stop()
+	done := make(chan struct{})
+	var runErr error
+	go loop.StartInForeground()
+	loop.RunOnLoop(func(vm *goja.Runtime) {
+		_ = vm.Set("doneCh", func(goja.FunctionCall) goja.Value {
+			close(done)
+			return goja.Undefined()
+		})
+		_, runErr = vm.RunString(`
+			setTimeout(function () {
+				queueMicrotask(function () { doneCh(); });
+			}, 5);
+		`)
+	})
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		if runErr != nil {
+			t.Fatalf("run: %v", runErr)
+		}
+		t.Fatal("timeout")
+	}
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+}

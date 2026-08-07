@@ -10,7 +10,7 @@ package main
 
 import (
     "github.com/dop251/goja"
-    "github.com/dop251/goja_nodejs/require"
+    "github.com/sealdice/goja_ext/require"
 )
 
 func main() {
