@@ -1,6 +1,11 @@
-# Scardice goja 模块迁移 — 交接文档（剩余任务）
+# Scardice goja 模块迁移交接文档（历史归档）
 
-> 本文接续 `feat/migrate-scardice-modules` 分支上已完成的工作。已完成的任务在末尾“已完成工作”一节。**请按顺序完成本文剩余任务（Task 3 websocket、Final 验证，可选 Task 2 代码质量复核）。**
+> **归档说明（2026-08-07）**：本文保留最初迁移任务、上游源码快照和当时的
+> 实现假设，仅用于追溯，不再是当前实现指南。WebSocket 已改为实例级依赖注入，
+> TLS 默认执行证书校验；全局 logger/manager 只保留在兼容入口。当前运行时与
+> 模块契约以 [`runtime-module-contracts-design.md`](runtime-module-contracts-design.md)
+> 和各模块 README 为准。下文关于“保留 `InsecureSkipVerify: true`”、全局连接
+> 管理器以及“剩余任务”的要求均为历史内容，不应重新实现。
 
 ## 仓库与分支
 

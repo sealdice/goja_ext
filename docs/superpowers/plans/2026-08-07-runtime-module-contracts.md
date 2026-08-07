@@ -69,7 +69,8 @@
 - Modify: `streams/node/README.md`, `streams/README.md`
 
 1. Add load-order tests proving no global leakage and no eager Web Streams initialization.
-2. Inject canonical Events and Abort through private Go bindings consumed by the bundle.
+2. Inject canonical Events and the private scheduler binding consumed by the bundle;
+   accept AbortSignal structurally without importing the Abort package.
 3. Load Web Streams lazily only for `toWeb/fromWeb` adapters.
 4. Replace Buffer use in Web text streams with native Uint8Array.
 5. Verify both load orders with `go test ./streams/... -count=1 -race`.

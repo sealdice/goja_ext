@@ -1,6 +1,9 @@
 # Afero-backed Goja FS 模块功能设计
 
-> **范围更新（2026-08-07）**：Deno FS API 是本项目的原生文件系统层；Node `fs` 兼容性作为后续 facade 建立在同一个 Go FS Core 上。符号链接、hard link、watch、锁和 terminal 等能力不再从核心设计中强行删除，而是移动到独立的 `extra` 扩展，通过 Afero 可选接口或宿主 capability 探测后按需安装。
+> **实现状态更新（2026-08-07）**：Deno FS API 是本项目的原生文件系统层；
+> Node `fs` facade 建立在同一个 Go FS Core 上。当前 `fs/extra` 只适配
+> `lstat`、符号链接、hard link 和由此实现的 `realpath`。本文早期设计中提到的
+> watch、锁和 terminal 尚未纳入当前声明的 FS 子集。
 
 ## 背景
 
@@ -25,7 +28,8 @@
 
 非目标：
 
-- Deno FS 核心不依赖符号链接、hard link、`watch`、文件锁和 terminal raw mode；这些能力在 `fs/extra` 中独立实现。
+- Deno FS 核心不依赖符号链接、hard link、`watch`、文件锁和 terminal raw mode；
+  链接能力由 `fs/extra` 按需适配，watch、锁和 terminal 当前不实现。
 - 不保证 Node.js `fs` 的完整错误码、Windows/junction 行为和平台专用 stat 字段。
 - 不在 Deno FS 第一阶段实现 Node `stream.Readable/Writable` 语义；Node classic streams 由 `streams/node` 独立模块提供。
 - 不要求 FS 自己暴露 byte streams、BYOB、TransformStream 或 Node stream API；这些能力属于独立的 `streams` 模块。FS 的文件句柄适配器使用 canonical Web Streams，调用方仍可在 FS 之外使用完整 WHATWG Streams 能力组织数据流。
@@ -64,7 +68,8 @@ func WithExtraCapabilities(capabilities ...Capability) Option
 
 `RequireWithOptions()` 没有办法从 goja_nodejs 的 native module loader 签名中自动取得 event loop，因此 Promise API 在该路径下只能同步完成 Afero 操作后返回已结算 Promise。需要真正 off-loop 执行时必须使用 `RequireWithLoop()`、`RequirePromisesWithLoop()`、`RegisterWithLoop()` 或 `EnableWithLoop()`。
 
-`fs/extra` 不默认注册；宿主显式提供扩展 capability 后，才注册对应的附加入口或在主 Deno facade 中安装附加方法。这样可以在不改动核心 API 的情况下移除整组扩展。
+`fs/extra` 不默认注册；宿主显式提供链接 capability 后，主 facade 才安装对应
+方法。这样可以在不改动核心 API 的情况下移除整组扩展。
 
 JS 侧分四类能力：
 
@@ -88,7 +93,8 @@ FS 模块与 Streams 模块之间复用以下 Go 集成契约：
 
 1. `fs/core`：持有 Afero、logical cwd、句柄表、路径转换、打开选项、错误映射和同步/异步 Go 操作；不创建 JS API。
 2. `fs`：Deno `30_fs.js` facade，导出 `FsFile`、路径 API、default Web Streams 读写，以及 Promise/sync API。
-3. `fs/extra`：能力探测式扩展，包含链接、hard link、watch、锁和 terminal 等不稳定能力；扩展只能依赖 `fs/core` 的 capability interface。
+3. `fs/extra`：能力探测式链接扩展，包含 `lstat`、符号链接和 hard link；
+   扩展只依赖 `fs` 声明的 capability interface。
 
 Node `fs` facade 以后放在 `fs/node`，直接依赖 `fs/core`，不通过 Deno JS facade 二次转换。当前 Streams 的 Node classic facade 同理放在 `streams/node`，不影响 `stream/web` 的 canonical constructor identity。
 
@@ -105,9 +111,6 @@ fs/
   extra/
     capabilities.go   # 可选接口探测
     links.go          # lstat/readlink/symlink/link/realpath
-    locking.go        # lock/tryLock/unlock
-    terminal.go       # isTerminal/raw mode
-    watch.go          # watch/watchFile，后端不支持时返回 ENOSYS
   node/
     api.go            # node:fs/fs facade，后续阶段
 ```
@@ -284,7 +287,8 @@ Stream 集成规则：
 - 目录读取和 stat 基础字段：可覆盖。
 - WHATWG `ReadableStream` / `WritableStream` 文件读写：可覆盖。
 - 真实平台 stat 扩展字段：Afero 能提供的字段覆盖，其余保持空值。
-- 符号链接、hard link、watch、锁、终端、raw mode：核心不依赖，扩展按能力覆盖。
+- 符号链接与 hard link：核心不依赖，扩展按 capability 覆盖。
+- watch、锁、终端与 raw mode：当前未实现，也不作为可注入 capability 对外宣称。
 - Node `fs` 和 classic stream：后续 facade，不阻塞 Deno FS。
 
 实际工作量主要在 JS API 适配、错误模型、异步回调、句柄表、Streams 集成和测试，而不是 Afero 后端本身。

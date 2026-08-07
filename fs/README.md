@@ -56,6 +56,6 @@ registry.RegisterNativeModule("fs", fs.RequireWithOptions(
   `ENOSYS`。`realpath` 会逐段解析 symlink 并检测 `ELOOP`，不会用
   `Stat` 或路径清理冒充。
 - `fs/extra.FromAfero` 适配 Afero 的 `Lstater`、`LinkReader` 与 `Linker`。
-  Afero 返回“已回退到 Stat”时仍视为不支持。hard link、watch、文件锁和
-  terminal 需要宿主提供独立 capability/实现。
+  Afero 返回“已回退到 Stat”时仍视为不支持。hard link 在 backend 实现
+  `Linker` 时可用；watch、文件锁和 terminal 不属于当前声明的 FS 子集。
 - `createReadStream` 的 `start`/`end`/`encoding`/`highWaterMark` 已支持；其余选项（如 `autoClose` 之外的高级项）未实现。

@@ -70,8 +70,7 @@ The neutral Afero-backed `Core` remains reusable. Installation is separated into
 
 - a Deno-style facade used by `fs.Enable*` and containing only Deno operations;
 - a Node facade used by `require("fs")` and `require("fs/promises")`;
-- optional capabilities for links, `lstat`, `realpath`, watch, locking, and terminal
-  behavior.
+- optional capabilities for links, `lstat`, and `realpath`.
 
 The Deno facade does not initialize or import Node classic streams. Node stream methods
 are installed only when Node streams are enabled and available. `WithStreams(false)`
@@ -88,10 +87,11 @@ without mutating the host process working directory.
 
 ## Streams and networking
 
-Node streams initialize from explicit canonical Events, Abort, and optional Web Streams
-values. Requiring Node streams does not initialize Web Streams unless a Web adapter is
-actually requested. The Web text stream layer emits and consumes native `Uint8Array`
-values and does not import Node Buffer.
+Node streams initialize from explicit canonical Events and optional Web Streams values.
+`addAbortSignal` consumes the supplied signal structurally, so the package does not
+import or initialize Abort. Requiring Node streams does not initialize Web Streams
+unless a Web adapter is actually requested. The Web text stream layer emits and
+consumes native `Uint8Array` values and does not import Node Buffer.
 
 Fetch and WebSocket use the runtime-bound scheduler. WebSocket dialer, TLS settings,
 logger, and connection manager are instance-scoped and injectable. TLS verification is
