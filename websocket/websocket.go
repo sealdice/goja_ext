@@ -20,6 +20,46 @@ import (
 // Logger 复用 eventloop 的日志接口，调用方可共用同一实例。
 type Logger = eventloop.Logger
 
+// Dialer performs a WebSocket handshake. protocols and enableCompression are
+// connection-specific and must not mutate shared dialer state.
+type Dialer interface {
+	DialContext(
+		ctx context.Context,
+		url string,
+		headers http.Header,
+		protocols []string,
+		enableCompression bool,
+	) (*websocket.Conn, *http.Response, error)
+}
+
+type gorillaDialer struct {
+	base websocket.Dialer
+}
+
+func newGorillaDialer(tlsConfig *tls.Config) Dialer {
+	base := *websocket.DefaultDialer
+	base.HandshakeTimeout = 5 * time.Second
+	if tlsConfig != nil {
+		base.TLSClientConfig = tlsConfig.Clone()
+	} else {
+		base.TLSClientConfig = nil
+	}
+	return &gorillaDialer{base: base}
+}
+
+func (d *gorillaDialer) DialContext(
+	ctx context.Context,
+	url string,
+	headers http.Header,
+	protocols []string,
+	enableCompression bool,
+) (*websocket.Conn, *http.Response, error) {
+	dialer := d.base
+	dialer.Subprotocols = append([]string(nil), protocols...)
+	dialer.EnableCompression = enableCompression
+	return dialer.DialContext(ctx, url, headers)
+}
+
 // wsDefaultLogger 是未注入日志器时的默认实现：Error/ErrorF 打到 stderr，其余丢弃。
 type wsDefaultLogger struct{}
 
@@ -36,8 +76,8 @@ func (wsDefaultLogger) Errorf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
-// WebSocketLogger 全局日志实例，用户可以通过SetLogger函数替换。
-// 并发读写由 loggerMu 保护；内部 goroutine 应通过 getLogger() 读取。
+// WebSocketLogger 是 Enable 兼容入口使用的全局日志实例。
+// 并发读写由 loggerMu 保护；Enable 会把当前值注入新模块。
 var (
 	loggerMu        sync.RWMutex
 	WebSocketLogger Logger = wsDefaultLogger{}
@@ -62,12 +102,19 @@ func SetLogger(logger Logger) {
 
 type (
 	// WebSocketModule 是WebSocket模块的根实例
-	WebSocketModule struct{}
+	WebSocketModule struct {
+		dialer  Dialer
+		logger  Logger
+		manager *WebSocketManager
+	}
 
 	// WebSocket 表示WebSocket模块的一个实例
 	WebSocket struct {
 		rt        *goja.Runtime
 		scheduler runtimehost.Scheduler
+		dialer    Dialer
+		logger    Logger
+		manager   *WebSocketManager
 	}
 	WebSocketManager struct {
 		connections []*WebSocketConnection
@@ -110,9 +157,72 @@ func (m *WebSocketManager) Unregister(conn *WebSocketConnection) {
 	}
 }
 
-// New 返回一个新的WebSocketModule实例
-func New() *WebSocketModule {
-	return &WebSocketModule{}
+// Len returns the number of connections currently owned by the manager.
+func (m *WebSocketManager) Len() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return len(m.connections)
+}
+
+// Option configures a WebSocketModule. Options are applied in order.
+type Option func(*WebSocketModule)
+
+// WithDialer injects the transport used for WebSocket handshakes.
+func WithDialer(dialer Dialer) Option {
+	return func(module *WebSocketModule) {
+		if dialer == nil {
+			panic("websocket: nil dialer")
+		}
+		module.dialer = dialer
+	}
+}
+
+// WithTLSConfig configures the built-in Gorilla dialer. The configuration is
+// cloned, so callers may reuse their input after New returns.
+func WithTLSConfig(config *tls.Config) Option {
+	return func(module *WebSocketModule) {
+		module.dialer = newGorillaDialer(config)
+	}
+}
+
+// WithLogger injects the logger used by this module and its connections.
+func WithLogger(logger Logger) Option {
+	return func(module *WebSocketModule) {
+		if logger == nil {
+			panic("websocket: nil logger")
+		}
+		module.logger = logger
+	}
+}
+
+// WithConnectionManager injects the owner responsible for connection cleanup.
+func WithConnectionManager(manager *WebSocketManager) Option {
+	return func(module *WebSocketModule) {
+		if manager == nil {
+			panic("websocket: nil connection manager")
+		}
+		module.manager = manager
+	}
+}
+
+// New returns an independently configured WebSocketModule.
+func New(options ...Option) *WebSocketModule {
+	module := &WebSocketModule{
+		dialer:  newGorillaDialer(nil),
+		logger:  wsDefaultLogger{},
+		manager: &WebSocketManager{},
+	}
+	for _, option := range options {
+		if option != nil {
+			option(module)
+		}
+	}
+	return module
+}
+
+// CloseAll closes all connections owned by this module.
+func (m *WebSocketModule) CloseAll() {
+	m.manager.CloseAll()
 }
 
 // NewInstance 为给定的goja运行时创建一个新的WebSocket实例
@@ -138,6 +248,9 @@ func (m *WebSocketModule) NewInstanceChecked(rt *goja.Runtime, loop *eventloop.E
 	return &WebSocket{
 		rt:        rt,
 		scheduler: loop,
+		dialer:    m.dialer,
+		logger:    m.logger,
+		manager:   m.manager,
 	}, nil
 }
 
@@ -170,6 +283,9 @@ func (ws *WebSocket) Exports() goja.Value {
 type WebSocketConnection struct {
 	rt           *goja.Runtime
 	scheduler    runtimehost.Scheduler
+	dialer       Dialer
+	logger       Logger
+	manager      *WebSocketManager
 	ctx          context.Context
 	conn         *websocket.Conn
 	connMu       sync.RWMutex
@@ -297,6 +413,9 @@ func (ws *WebSocket) NewWebSocketConnection(call goja.FunctionCall) goja.Value {
 	conn := &WebSocketConnection{
 		rt:             rt,
 		scheduler:      ws.scheduler,
+		dialer:         ws.dialer,
+		logger:         ws.logger,
+		manager:        ws.manager,
 		url:            url,
 		protocol:       "",
 		readyState:     Connecting,
@@ -308,7 +427,7 @@ func (ws *WebSocket) NewWebSocketConnection(call goja.FunctionCall) goja.Value {
 		onerror:        goja.Undefined(),
 		eventListeners: make(map[string][]goja.Value),
 	}
-	GlobalConnManager.Register(conn)
+	conn.manager.Register(conn)
 
 	conn.bindWebSocketMethods()
 
@@ -416,31 +535,29 @@ func (conn *WebSocketConnection) connect(options *webSocketOptions) {
 	ctx := context.Background()
 	conn.ctx = ctx
 
-	getLogger().Debugf("开始建立WebSocket连接 url=%s protocols=%v", conn.url, options.protocols)
+	conn.logger.Debugf("开始建立WebSocket连接 url=%s protocols=%v", conn.url, options.protocols)
 
-	dialer := &websocket.Dialer{
-		HandshakeTimeout:  5 * time.Second,
-		EnableCompression: options.enableCompression,
-		Subprotocols:      options.protocols,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec
-		},
-	}
-
-	wsConn, resp, err := dialer.Dial(conn.url, options.headers)
+	wsConn, resp, err := conn.dialer.DialContext(
+		ctx,
+		conn.url,
+		options.headers,
+		options.protocols,
+		options.enableCompression,
+	)
 	if err != nil {
-		getLogger().Errorf("WebSocket连接失败 url=%s error=%s", conn.url, err.Error())
+		conn.logger.Errorf("WebSocket连接失败 url=%s error=%s", conn.url, err.Error())
 		conn.setReadyState(Closed)
 		conn.triggerError(err)
+		conn.webSocketCloseConnection()
 		return
 	}
 
-	getLogger().Infof("WebSocket连接建立成功 url=%s", conn.url)
+	conn.logger.Infof("WebSocket连接建立成功 url=%s", conn.url)
 
 	if resp != nil {
 		conn.protocol = resp.Header.Get("Sec-WebSocket-Protocol")
 		if conn.protocol != "" {
-			getLogger().Debugf("选择的子协议 protocol=%s", conn.protocol)
+			conn.logger.Debugf("选择的子协议 protocol=%s", conn.protocol)
 		}
 		_ = resp.Body.Close()
 	}
@@ -489,7 +606,7 @@ func (conn *WebSocketConnection) triggerClose(code int, reason string) {
 }
 
 func (conn *WebSocketConnection) triggerError(err error) {
-	getLogger().Errorf("触发WebSocket错误事件 url=%s error=%s", conn.url, err.Error())
+	conn.logger.Errorf("触发WebSocket错误事件 url=%s error=%s", conn.url, err.Error())
 
 	conn.dispatchEvent("error", func(vm *goja.Runtime, event *goja.Object) {
 		_ = event.Set("error", err.Error())
@@ -501,21 +618,21 @@ func (conn *WebSocketConnection) Send(message string) error {
 	readyState := conn.getReadyState()
 	if readyState != Open {
 		err := errors.New("connection is not open")
-		getLogger().Warnf("尝试在非开放连接上发送消息 readyState=%d url=%s", readyState, conn.url)
+		conn.logger.Warnf("尝试在非开放连接上发送消息 readyState=%d url=%s", readyState, conn.url)
 		return err
 	}
 
-	getLogger().Debugf("发送WebSocket消息 url=%s messageLength=%d", conn.url, len(message))
+	conn.logger.Debugf("发送WebSocket消息 url=%s messageLength=%d", conn.url, len(message))
 
 	c := conn.getConn()
 	err := c.SetWriteDeadline(time.Now().Add(writeWait))
 	if err != nil {
-		getLogger().Errorf("设置WebSocket写入超时失败 url=%s error=%s", conn.url, err.Error())
+		conn.logger.Errorf("设置WebSocket写入超时失败 url=%s error=%s", conn.url, err.Error())
 		return err
 	}
 	err = c.WriteMessage(websocket.TextMessage, []byte(message))
 	if err != nil {
-		getLogger().Errorf("发送WebSocket消息失败 url=%s error=%s", conn.url, err.Error())
+		conn.logger.Errorf("发送WebSocket消息失败 url=%s error=%s", conn.url, err.Error())
 	}
 	return err
 }
@@ -533,7 +650,7 @@ func (conn *WebSocketConnection) Close(args ...interface{}) {
 			reason = r
 		}
 	}
-	getLogger().Infof("关闭WebSocket连接 url=%s code=%d reason=%s", conn.url, code, reason)
+	conn.logger.Infof("关闭WebSocket连接 url=%s code=%d reason=%s", conn.url, code, reason)
 	conn.closeInternal(true, args...)
 }
 
@@ -544,7 +661,7 @@ func (conn *WebSocketConnection) closeWithoutUnregister(args ...interface{}) {
 func (conn *WebSocketConnection) closeInternal(shouldUnregister bool, args ...interface{}) {
 	readyState, started := conn.startClosing()
 	if !started {
-		getLogger().Debugf("连接已经关闭或正在关闭 readyState=%d url=%s", readyState, conn.url)
+		conn.logger.Debugf("连接已经关闭或正在关闭 readyState=%d url=%s", readyState, conn.url)
 		return
 	}
 
@@ -563,12 +680,12 @@ func (conn *WebSocketConnection) closeInternal(shouldUnregister bool, args ...in
 		}
 	}
 
-	getLogger().Infof("主动关闭WebSocket连接 url=%s code=%d reason=%s", conn.url, code, reason)
+	conn.logger.Infof("主动关闭WebSocket连接 url=%s code=%d reason=%s", conn.url, code, reason)
 
 	if c := conn.getConn(); c != nil {
 		err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason))
 		if err != nil {
-			getLogger().Warnf("发送关闭消息失败 url=%s error=%s", conn.url, err.Error())
+			conn.logger.Warnf("发送关闭消息失败 url=%s error=%s", conn.url, err.Error())
 		}
 		_ = c.Close()
 	}
@@ -590,21 +707,21 @@ func (conn *WebSocketConnection) readPump() {
 	defer conn.webSocketCloseConnection()
 
 	c := conn.getConn()
-	getLogger().Debugf("开始WebSocket消息读取循环 url=%s", conn.url)
+	conn.logger.Debugf("开始WebSocket消息读取循环 url=%s", conn.url)
 
 	for {
 		select {
 		case <-conn.done:
-			getLogger().Debugf("WebSocket消息读取循环结束 url=%s", conn.url)
+			conn.logger.Debugf("WebSocket消息读取循环结束 url=%s", conn.url)
 			return
 		default:
 			messageType, message, err := c.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					getLogger().Errorf("WebSocket意外关闭错误 url=%s error=%s", conn.url, err.Error())
+					conn.logger.Errorf("WebSocket意外关闭错误 url=%s error=%s", conn.url, err.Error())
 					conn.triggerError(err)
 				} else {
-					getLogger().Infof("WebSocket连接正常关闭 url=%s error=%s", conn.url, err.Error())
+					conn.logger.Infof("WebSocket连接正常关闭 url=%s error=%s", conn.url, err.Error())
 				}
 				// 仅在非主动关闭时派发被动 close 事件。主动关闭路径（closeInternal）
 				// 会先把 readyState 置为 Closing，故 readPump 此处总能观察到并让出派发权。
@@ -616,13 +733,13 @@ func (conn *WebSocketConnection) readPump() {
 
 			switch messageType {
 			case websocket.TextMessage:
-				getLogger().Debugf("接收到文本消息 url=%s messageLength=%d", conn.url, len(message))
+				conn.logger.Debugf("接收到文本消息 url=%s messageLength=%d", conn.url, len(message))
 				conn.triggerMessage(string(message))
 			case websocket.BinaryMessage:
-				getLogger().Debugf("接收到二进制消息 url=%s messageLength=%d", conn.url, len(message))
+				conn.logger.Debugf("接收到二进制消息 url=%s messageLength=%d", conn.url, len(message))
 				conn.triggerMessage(message)
 			default:
-				getLogger().Warnf("接收到未知类型消息 url=%s messageType=%d", conn.url, messageType)
+				conn.logger.Warnf("接收到未知类型消息 url=%s messageType=%d", conn.url, messageType)
 			}
 		}
 	}
@@ -630,23 +747,34 @@ func (conn *WebSocketConnection) readPump() {
 
 func (conn *WebSocketConnection) webSocketCloseConnection() {
 	conn.shutdownOnce.Do(func() {
-		getLogger().Debugf("清理WebSocket连接资源 url=%s", conn.url)
-		GlobalConnManager.Unregister(conn)
+		conn.logger.Debugf("清理WebSocket连接资源 url=%s", conn.url)
+		conn.manager.Unregister(conn)
 		close(conn.done)
 		if c := conn.getConn(); c != nil {
 			_ = c.Close()
 		}
-		getLogger().Debugf("WebSocket连接资源清理完成 url=%s", conn.url)
+		conn.logger.Debugf("WebSocket连接资源清理完成 url=%s", conn.url)
 	})
 }
 
-func Enable(rt *goja.Runtime, loop *eventloop.EventLoop) error {
-	module := New()
+// EnableWithOptions installs an independently configured WebSocket constructor.
+func EnableWithOptions(rt *goja.Runtime, loop *eventloop.EventLoop, options ...Option) error {
+	module := New(options...)
 	instance, err := module.NewInstanceChecked(rt, loop)
 	if err != nil {
 		return err
 	}
 	return rt.Set("WebSocket", instance.Exports())
+}
+
+// Enable installs WebSocket with the legacy process-global logger and manager.
+func Enable(rt *goja.Runtime, loop *eventloop.EventLoop) error {
+	return EnableWithOptions(
+		rt,
+		loop,
+		WithLogger(getLogger()),
+		WithConnectionManager(GlobalConnManager),
+	)
 }
 
 func (conn *WebSocketConnection) addEventListener(eventType string, listener goja.Value) {
@@ -718,7 +846,7 @@ func (conn *WebSocketConnection) dispatchEvent(eventType string, populate func(v
 		if !goja.IsUndefined(handler) && !goja.IsNull(handler) {
 			if fn, ok := goja.AssertFunction(handler); ok {
 				if _, err := fn(conn.jsObject, event); err != nil {
-					getLogger().Errorf("处理WebSocket%s事件失败 url=%s error=%s", eventType, conn.url, err.Error())
+					conn.logger.Errorf("处理WebSocket%s事件失败 url=%s error=%s", eventType, conn.url, err.Error())
 				}
 			}
 		}
@@ -727,7 +855,7 @@ func (conn *WebSocketConnection) dispatchEvent(eventType string, populate func(v
 		for _, l := range listeners {
 			if fn, ok := goja.AssertFunction(l); ok {
 				if _, err := fn(conn.jsObject, event); err != nil {
-					getLogger().Errorf("处理WebSocket%s事件监听失败 url=%s error=%s", eventType, conn.url, err.Error())
+					conn.logger.Errorf("处理WebSocket%s事件监听失败 url=%s error=%s", eventType, conn.url, err.Error())
 				}
 			}
 		}
