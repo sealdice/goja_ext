@@ -82,10 +82,10 @@ func TestFetch_GetJSONTextArrayBuffer(t *testing.T) {
 			(async () => {
 				try {
 					const r = await fetch("` + srv.URL + `?b=2&a=1");
-					const text = await r.text();
-					const json = await r.json();
 					const ab = await r.arrayBuffer();
 					const bytes = new Uint8Array(ab);
+					let text = ""; for (let i=0;i<bytes.length;i++) text += String.fromCharCode(bytes[i]);
+					const json = JSON.parse(text);
 					let bt = ""; for (let i=0;i<bytes.length;i++){ if(i) bt+=","; bt+=String(bytes[i]); }
 					globalThis.__status = String(r.status);
 					globalThis.__ok = String(r.ok);
@@ -122,6 +122,91 @@ func TestFetch_GetJSONTextArrayBuffer(t *testing.T) {
 	}
 	if gstr(t, loop, "__hasBin") != "true" {
 		t.Fatalf("text missing bin")
+	}
+}
+
+func TestFetch_StreamingBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("chunk1"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write([]byte("chunk2"))
+	}))
+	defer srv.Close()
+
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(vm *goja.Runtime) {
+		Enable(vm)
+		_ = EnableFetch(vm, loop)
+		_, err := vm.RunString(`
+			globalThis.__done = false; globalThis.__err = "";
+			(async () => {
+				try {
+					const r = await fetch("` + srv.URL + `");
+					const reader = r.body.getReader();
+					const out = [];
+					const dec = (u8) => { let s = ""; for (let i=0;i<u8.length;i++) s += String.fromCharCode(u8[i]); return s; };
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) break;
+						out.push(dec(value));
+					}
+					globalThis.__result = out.join("|");
+				} catch(e) { globalThis.__err = String(e && e.stack || e); }
+				finally { globalThis.__done = true; }
+			})();
+		`)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+	waitBool(t, loop, "__done")
+	if e := gstr(t, loop, "__err"); e != "" {
+		t.Fatalf("err: %s", e)
+	}
+	if s := gstr(t, loop, "__result"); s != "chunk1|chunk2" {
+		t.Fatalf("streaming result %q", s)
+	}
+}
+
+func TestFetch_BodyConsumedTwiceFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(vm *goja.Runtime) {
+		Enable(vm)
+		_ = EnableFetch(vm, loop)
+		_, err := vm.RunString(`
+			globalThis.__done = false; globalThis.__err = ""; globalThis.__twice = "";
+			(async () => {
+				try {
+					const r = await fetch("` + srv.URL + `");
+					await r.text();
+					try {
+						await r.json();
+						globalThis.__twice = "no-throw";
+					} catch (e) { globalThis.__twice = "threw"; }
+				} catch(e) { globalThis.__err = String(e && e.stack || e); }
+				finally { globalThis.__done = true; }
+			})();
+		`)
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
+	waitBool(t, loop, "__done")
+	if e := gstr(t, loop, "__err"); e != "" {
+		t.Fatalf("err: %s", e)
+	}
+	if s := gstr(t, loop, "__twice"); s != "threw" {
+		t.Fatalf("expected body reuse to throw, got %q", s)
 	}
 }
 

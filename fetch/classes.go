@@ -1,10 +1,13 @@
 package fetch
 
 import (
+	"errors"
+	"io"
 	"strconv"
 	"strings"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/eventloop"
 )
 
 type headersData struct {
@@ -360,6 +363,7 @@ type responseData struct {
 	statusText string
 	headers    *headersData
 	bodyBytes  []byte
+	body       io.ReadCloser
 	url        string
 	method     string
 }
@@ -390,16 +394,15 @@ func newResponseCtor(rt *goja.Runtime) func(call goja.ConstructorCall) *goja.Obj
 			}
 		}
 
-		bindResponse(rt, obj, data)
+		bindResponse(rt, obj, data, nil)
 		return obj
 	}
 }
 
-func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData) {
+func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, loop *eventloop.EventLoop) {
 	_ = obj.Set("status", data.status)
 	_ = obj.Set("statusText", data.statusText)
 	_ = obj.Set("ok", data.status >= 200 && data.status < 300)
-	_ = obj.Set("body", string(data.bodyBytes))
 	if data.url != "" {
 		_ = obj.Set("url", data.url)
 	}
@@ -410,33 +413,39 @@ func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData) {
 	bindHeaders(rt, headersObj, data.headers)
 	_ = obj.Set("headers", headersObj)
 
-	_ = obj.Set("text", func(call goja.FunctionCall) goja.Value {
-		p, resolve, _ := rt.NewPromise()
-		_ = resolve(rt.ToValue(string(data.bodyBytes)))
-		return rt.ToValue(p)
+	var bodyStream goja.Value
+	switch {
+	case data.body != nil:
+		bodyStream = fetchReadableStream(rt, loop, data.body)
+	case data.bodyBytes != nil:
+		bodyStream = bufferedReadableStream(rt, data.bodyBytes)
+	default:
+		bodyStream = bufferedReadableStream(rt, nil)
+	}
+	_ = obj.Set("body", bodyStream)
+
+	_ = obj.Set("text", func(goja.FunctionCall) goja.Value {
+		return consumeBody(rt, bodyStream, func(rt *goja.Runtime, bytes []byte) (goja.Value, error) {
+			return rt.ToValue(string(bytes)), nil
+		})
 	})
 
-	_ = obj.Set("json", func(call goja.FunctionCall) goja.Value {
-		p, resolve, reject := rt.NewPromise()
-		if data.bodyBytes == nil {
-			_ = reject(rt.NewTypeError("no body"))
-			return rt.ToValue(p)
-		}
-		raw := string(data.bodyBytes)
-		jsonObj := rt.Get("JSON").ToObject(rt)
-		parse, _ := goja.AssertFunction(jsonObj.Get("parse"))
-		if parsed, err := parse(goja.Undefined(), rt.ToValue(raw)); err == nil {
-			_ = resolve(parsed)
-		} else {
-			_ = reject(err)
-		}
-		return rt.ToValue(p)
+	_ = obj.Set("json", func(goja.FunctionCall) goja.Value {
+		return consumeBody(rt, bodyStream, func(rt *goja.Runtime, bytes []byte) (goja.Value, error) {
+			raw := string(bytes)
+			jsonObj := rt.Get("JSON").ToObject(rt)
+			parse, _ := goja.AssertFunction(jsonObj.Get("parse"))
+			if parsed, err := parse(goja.Undefined(), rt.ToValue(raw)); err == nil {
+				return parsed, nil
+			}
+			return nil, errors.New("invalid JSON body")
+		})
 	})
 
-	_ = obj.Set("arrayBuffer", func(call goja.FunctionCall) goja.Value {
-		p, resolve, _ := rt.NewPromise()
-		_ = resolve(rt.ToValue(rt.NewArrayBuffer(append([]byte(nil), data.bodyBytes...))))
-		return rt.ToValue(p)
+	_ = obj.Set("arrayBuffer", func(goja.FunctionCall) goja.Value {
+		return consumeBody(rt, bodyStream, func(rt *goja.Runtime, bytes []byte) (goja.Value, error) {
+			return rt.ToValue(rt.NewArrayBuffer(bytes)), nil
+		})
 	})
 }
 

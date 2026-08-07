@@ -44,14 +44,18 @@ func (s *fetchAbortState) get() goja.Value {
 	return s.reason
 }
 
-// EnableFetch registers the global fetch(url, init) -> Promise<Response>.
-// opts configure the Go-side resty executor; none of them are exposed to JS.
+// EnableFetch registers the global fetch(url, init) -> Promise<Response> and the
+// EventSource (SSE) constructor. opts configure the Go-side resty executor;
+// none of them are exposed to JS.
 func EnableFetch(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...FetchOption) error {
 	if loop == nil {
 		return errors.New("JS event loop is required for fetch")
 	}
 	client := newClient(opts...)
-	return rt.Set("fetch", newFetchFn(rt, loop, client))
+	if err := rt.Set("fetch", newFetchFn(rt, loop, client)); err != nil {
+		return err
+	}
+	return rt.Set("EventSource", newEventSourceCtor(rt, loop, client))
 }
 
 func newFetchFn(rt *goja.Runtime, loop *eventloop.EventLoop, client *resty.Client) func(goja.FunctionCall) goja.Value {
@@ -70,7 +74,7 @@ func newFetchFn(rt *goja.Runtime, loop *eventloop.EventLoop, client *resty.Clien
 				switch {
 				case err == nil:
 					response := loopRT.NewObject()
-					bindResponse(loopRT, response, responseData)
+					bindResponse(loopRT, response, responseData, loop)
 					_ = resolve(response)
 				case requestData.abort.get() != nil:
 					_ = reject(requestData.abort.get())
@@ -261,7 +265,7 @@ func encodeFetchURL(rawURL string) (string, error) {
 }
 
 func doFetchRequest(data *fetchRequestData, client *resty.Client) (*responseData, error) {
-	req := client.R().SetContext(data.ctx)
+	req := client.R().SetContext(data.ctx).SetDoNotParseResponse(true)
 	req.Header = data.headers.toHTTPHeader()
 	if data.body != nil {
 		req.SetBody(data.body)
@@ -274,7 +278,7 @@ func doFetchRequest(data *fetchRequestData, client *resty.Client) (*responseData
 		status:     resp.StatusCode(),
 		statusText: resp.Status(),
 		headers:    newHeadersDataFromHTTPHeader(resp.Header()),
-		bodyBytes:  append([]byte(nil), resp.Body()...),
+		body:       resp.RawBody(),
 		url:        data.url,
 		method:     data.method,
 	}, nil
