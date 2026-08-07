@@ -66,7 +66,7 @@ func TestGetters(t *testing.T) {
 		},
 		{
 			prop:     "origin",
-			expected: "https://sub.example.com",
+			expected: "https://sub.example.com:8080",
 		},
 		{
 			prop:     "password",
@@ -95,6 +95,25 @@ func TestGetters(t *testing.T) {
 		if v != test.expected {
 			t.Fatal("failed to match " + test.prop + " property. got: " + v + ", expected: " + test.expected)
 		}
+	}
+}
+
+func TestURLOriginOmitsOnlyDefaultPort(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+	Enable(vm)
+
+	v, err := vm.RunString(`JSON.stringify([
+		new URL("http://example.com:80/").origin,
+		new URL("http://example.com:8080/").origin,
+		new URL("wss://example.com:443/").origin,
+		new URL("wss://example.com:8443/").origin
+	])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := v.String(), `["http://example.com","http://example.com:8080","wss://example.com","wss://example.com:8443"]`; got != want {
+		t.Fatalf("got %s want %s", got, want)
 	}
 }
 

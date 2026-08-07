@@ -1,6 +1,9 @@
 package console
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
 	"github.com/sealdice/goja_ext/util"
@@ -22,19 +25,47 @@ type Printer interface {
 
 func (c *Console) log(p func(string)) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
-		if format, ok := goja.AssertFunction(c.util.Get("format")); ok {
-			ret, err := format(c.util, call.Arguments...)
-			if err != nil {
-				panic(err)
-			}
-
-			p(ret.String())
-		} else {
-			panic(c.runtime.NewTypeError("util.format is not a function"))
-		}
+		p(c.format(call.Arguments))
 
 		return nil
 	}
+}
+
+func (c *Console) format(arguments []goja.Value) string {
+	format, ok := goja.AssertFunction(c.util.Get("format"))
+	if !ok {
+		panic(c.runtime.NewTypeError("util.format is not a function"))
+	}
+	ret, err := format(c.util, arguments...)
+	if err != nil {
+		panic(err)
+	}
+	return ret.String()
+}
+
+func (c *Console) trace(call goja.FunctionCall) goja.Value {
+	var trace strings.Builder
+	trace.WriteString("Trace")
+	if message := c.format(call.Arguments); message != "" {
+		trace.WriteString(": ")
+		trace.WriteString(message)
+	}
+	for _, frame := range c.runtime.CaptureCallStack(0, nil) {
+		position := frame.Position()
+		if position.Filename == "" {
+			continue
+		}
+		fmt.Fprintf(
+			&trace,
+			"\n    at %s (%s:%d:%d)",
+			frame.FuncName(),
+			position.Filename,
+			position.Line,
+			position.Column,
+		)
+	}
+	c.printer.Error(trace.String())
+	return goja.Undefined()
 }
 
 func Require(runtime *goja.Runtime, module *goja.Object) {
@@ -60,6 +91,7 @@ func requireWithPrinter(printer Printer) require.ModuleLoader {
 		o.Set("warn", c.log(c.printer.Warn))
 		o.Set("info", c.log(c.printer.Log))
 		o.Set("debug", c.log(c.printer.Log))
+		o.Set("trace", c.trace)
 	}
 }
 

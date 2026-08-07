@@ -1,7 +1,7 @@
 # structuredclone
 
 `structuredclone` 为 Goja 提供全局 `structuredClone(value)` 函数，
-用于复制 JavaScript 值，并尽量保留容器结构和循环引用。
+用于复制 JavaScript 值，并保留支持类型的容器结构和循环引用。
 
 ## 支持范围
 
@@ -14,10 +14,12 @@
 - `Map`
 - `Set`
 - `Date`
+- `RegExp`
+- `ArrayBuffer`、`DataView` 和 TypedArray
 
-对于未特别处理的值，当前实现会回退到 JSON 序列化和反序列化。
-因此函数、符号以及其他复杂对象不应被视为完整浏览器
-Structured Clone Algorithm 的等价实现。
+函数、Symbol、`WeakMap`、`WeakSet`、Promise 和无法识别的宿主对象会抛出
+名称为 `DataCloneError`、代码为 25 的异常。实现不会通过 JSON 降级，也不会
+在失败时返回原对象。
 
 ## Go API
 

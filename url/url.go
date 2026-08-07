@@ -286,7 +286,7 @@ func (m *urlModule) createURLPrototype() *goja.Object {
 
 	// origin
 	m.defineURLAccessorProp(p, "origin", func(u *nodeURL) interface{} {
-		return u.url.Scheme + "://" + u.url.Hostname()
+		return u.url.Scheme + "://" + u.url.Host
 	}, nil)
 
 	// password

@@ -1,6 +1,7 @@
 package console
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
@@ -74,5 +75,33 @@ func TestConsoleWithPrinter(t *testing.T) {
 
 	if want := "bc"; stderrStr != want {
 		t.Fatalf("Unexpected stderr output: got %q, want %q", stderrStr, want)
+	}
+}
+
+func TestConsoleTraceIncludesFormattedMessageAndStack(t *testing.T) {
+	var stderr string
+	printer := StdPrinter{
+		StdoutPrint: func(string) {},
+		StderrPrint: func(s string) { stderr += s },
+	}
+
+	vm := goja.New()
+	registry := new(require.Registry)
+	registry.Enable(vm)
+	registry.RegisterNativeModule(ModuleName, RequireWithPrinter(printer))
+	Enable(vm)
+
+	_, err := vm.RunScript("trace_test.js", `
+		function caller() { console.trace("value=%d", 2); }
+		caller();
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, "Trace: value=2") {
+		t.Fatalf("trace message missing from %q", stderr)
+	}
+	if !strings.Contains(stderr, "at caller (trace_test.js:") {
+		t.Fatalf("caller stack frame missing from %q", stderr)
 	}
 }

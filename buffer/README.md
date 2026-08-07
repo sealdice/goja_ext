@@ -10,7 +10,8 @@ Goja 兼容的 Node `buffer` 模块。
 ## 能力
 
 - `Buffer` 构造器与 `Buffer.from` / `Buffer.alloc` / `Buffer.concat` 等静态方法。
-- 编码/解码：utf8、hex、base64、latin1、ucs2 等（`buffer.StringCodecByName`）。
+- 历史数值构造形式 `new Buffer(size)` / `Buffer(size)` 已实现；新代码仍应优先使用明确的 `Buffer.alloc(size)`。
+- 当前公共 codec 表支持 utf8、hex、base64 与 base64Url。
 - 其他包通过 `buffer.Bytes` / `buffer.WrapBytes` / `buffer.DecodeBytes` / `buffer.EncodeBytes` 复用字节桥。
 
 ## Go API

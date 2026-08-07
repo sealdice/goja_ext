@@ -140,8 +140,18 @@ func (b *Buffer) ctor(call goja.ConstructorCall) (res *goja.Object) {
 	arg := call.Argument(0)
 	switch arg.ExportType() {
 	case reflectTypeInt, reflectTypeFloat:
-		panic(b.r.NewTypeError("Calling the Buffer constructor with numeric argument is not implemented yet"))
-		// TODO implement
+		size := arg.ToFloat()
+		const maxBufferLength = float64(math.MaxUint32)
+		if math.IsNaN(size) || math.IsInf(size, 0) || size < 0 || size > maxBufferLength {
+			panic(errors.NewRangeError(
+				b.r,
+				errors.ErrCodeOutOfRange,
+				`The value of "size" is out of range. It must be >= 0 && <= %d. Received %v`,
+				uint64(math.MaxUint32),
+				size,
+			))
+		}
+		return b.fromBytes(make([]byte, int64(size)))
 	}
 	return b._from(call.Arguments...)
 }
