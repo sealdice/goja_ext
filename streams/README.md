@@ -11,7 +11,8 @@ WHATWG Streams 与 Node classic streams 的 Goja 实现。
 ## WHATWG 能力
 
 - `ReadableStream`（含 byte stream/BYOB、`from`、`values`、async iterator）、`WritableStream`、`TransformStream`、reader/writer/controller、`tee`/`pipeTo`/`pipeThrough`、两种 QueuingStrategy。
-- `TextEncoderStream` / `TextDecoderStream`（UTF-8）。
+- `TextEncoderStream` / `TextDecoderStream`（UTF-8）；编码器输出原生
+  `Uint8Array`，Web Streams 层不依赖 Node `Buffer`。
 - Go 侧集成：`streams.NewReadableStream` / `NewWritableStream` / `IsReadableStream` / `ConsumeReadableStream`（`streams/integration.go`），供 fs、fetch 等复用 canonical 流。
 
 ## Node classic（streamx 引擎）
@@ -19,6 +20,8 @@ WHATWG Streams 与 Node classic streams 的 Goja 实现。
 - 构造器：`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`。
 - 辅助：`pipeline`、`finished`、`addAbortSignal`、`Readable.from`、谓词、`duplexPair`。
 - Web ↔ classic 适配：`Readable.toWeb/fromWeb`、`Writable.toWeb/fromWeb`、`Duplex.toWeb/fromWeb`。
+- 仅加载 Node classic streams 不初始化 Web Streams；上述适配器首次调用时
+  才解析 canonical `stream/web`。
 - 事件基座复用 canonical `events` 模块（`require("events").EventEmitter` 与 stream 对象构造器身份一致）。
 - bundle 来源：`streams/internal/streamx`（streamx@2.28.0，esbuild，SHA-256 见其 README）；构建脚本 `scripts/build-node-streams.mjs`。
 

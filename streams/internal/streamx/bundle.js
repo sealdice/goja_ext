@@ -2190,7 +2190,7 @@ var require_bridge = __commonJS({
   "streams/internal/streamx/bridge.js"(exports2, module2) {
     var stream2 = require_streamx();
     function canonical() {
-      return globalThis.__goja_ext_streams_canonical;
+      return require("goja:stream/web");
     }
     function readableToWeb(readable, opts) {
       return canonical().ReadableStream.from(readable);

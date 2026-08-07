@@ -18,9 +18,10 @@ streams facade for the Goja `stream` module.
 
 - Bundler: `esbuild`
 - Target: ES2015, CJS, browser platform
-- External: `events` (canonical module injected by Go)
+- External: `events` and `goja:stream/web` (canonical modules supplied by Go;
+  Web Streams are resolved lazily by adapter calls)
 - Build: `npm run build:node-streams` (see `scripts/build-node-streams.mjs`)
-- SHA-256 (bundle.js): `2e4288765b44147b52632fb636f7e9e32f5b2e7ec6beee8884a454c343afc358`
+- SHA-256 (bundle.js): `b08a895a20d98c425037eca466e85b6ff28ab52a3966ef2d45304061e717697b`
 
 ## Semantic differences vs readable-stream (Node)
 

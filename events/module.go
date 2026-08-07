@@ -6,6 +6,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 const ModuleName = "events"
@@ -14,7 +15,7 @@ const ModuleName = "events"
 var eventsSource string
 
 var (
-	moduleSymbol  = goja.NewSymbol("goja_ext.events.module")
+	moduleKey     = runtimehost.NewKey("events.exports")
 	eventsProgram = mustCompile()
 )
 
@@ -42,12 +43,8 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 // is shared by require("events"), require("node:events") and the streamx
 // facade, guaranteeing constructor identity.
 func Exports(rt *goja.Runtime) *goja.Object {
-	global := rt.GlobalObject()
-	if value := global.GetSymbol(moduleSymbol); value != nil &&
-		!goja.IsUndefined(value) && !goja.IsNull(value) {
-		if exports, ok := value.(*goja.Object); ok {
-			return exports
-		}
+	if value, ok := runtimehost.Load(rt, moduleKey); ok {
+		return value.(*goja.Object)
 	}
 	ensureAsyncIteratorSymbol(rt)
 	value, err := rt.RunProgram(eventsProgram)
@@ -58,9 +55,7 @@ func Exports(rt *goja.Runtime) *goja.Object {
 	if !ok {
 		panic("events: did not return an exports object")
 	}
-	if err := global.SetSymbol(moduleSymbol, exports); err != nil {
-		panic(err)
-	}
+	runtimehost.Store(rt, moduleKey, exports)
 	return exports
 }
 

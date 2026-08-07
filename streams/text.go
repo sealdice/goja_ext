@@ -6,7 +6,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/buffer"
 )
 
 var textExportNames = [...]string{
@@ -15,7 +14,7 @@ var textExportNames = [...]string{
 }
 
 func encodeUTF8(rt *goja.Runtime, call goja.FunctionCall) goja.Value {
-	return buffer.WrapBytes(rt, []byte(call.Argument(0).String()))
+	return uint8Array(rt, []byte(call.Argument(0).String()))
 }
 
 func decodeUTF8(rt *goja.Runtime, call goja.FunctionCall) goja.Value {
@@ -37,7 +36,7 @@ func decodeUTF8(rt *goja.Runtime, call goja.FunctionCall) goja.Value {
 		if err := result.Set("text", ""); err != nil {
 			panic(err)
 		}
-		if err := result.Set("pending", buffer.WrapBytes(rt, data)); err != nil {
+		if err := result.Set("pending", uint8Array(rt, data)); err != nil {
 			panic(err)
 		}
 		if err := result.Set("bomPending", true); err != nil {
@@ -55,7 +54,7 @@ func decodeUTF8(rt *goja.Runtime, call goja.FunctionCall) goja.Value {
 	if err := result.Set("text", text); err != nil {
 		panic(err)
 	}
-	if err := result.Set("pending", buffer.WrapBytes(rt, remaining)); err != nil {
+	if err := result.Set("pending", uint8Array(rt, remaining)); err != nil {
 		panic(err)
 	}
 	if err := result.Set("bomPending", false); err != nil {
@@ -68,13 +67,39 @@ func decodeInputBytes(rt *goja.Runtime, value goja.Value) []byte {
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
 		return nil
 	}
-	var data []byte
-	if exception := rt.Try(func() {
-		data = buffer.DecodeBytes(rt, value, goja.Undefined())
-	}); exception != nil {
-		panic(exception)
+	switch exported := value.Export().(type) {
+	case []byte:
+		return append([]byte(nil), exported...)
+	case goja.ArrayBuffer:
+		return append([]byte(nil), exported.Bytes()...)
 	}
-	return data
+	if object, ok := value.(*goja.Object); ok {
+		bufferValue := object.Get("buffer")
+		if bufferValue != nil && !goja.IsUndefined(bufferValue) && !goja.IsNull(bufferValue) {
+			if arrayBuffer, ok := bufferValue.Export().(goja.ArrayBuffer); ok {
+				offset := int(object.Get("byteOffset").ToInteger())
+				length := int(object.Get("byteLength").ToInteger())
+				bytes := arrayBuffer.Bytes()
+				if offset >= 0 && length >= 0 && offset+length <= len(bytes) {
+					return append([]byte(nil), bytes[offset:offset+length]...)
+				}
+			}
+		}
+	}
+	panic(rt.NewTypeError("TextDecoderStream input must be an ArrayBuffer or ArrayBufferView"))
+}
+
+func uint8Array(rt *goja.Runtime, data []byte) *goja.Object {
+	constructor, ok := goja.AssertConstructor(rt.Get("Uint8Array"))
+	if !ok {
+		panic(rt.NewTypeError("Uint8Array constructor is unavailable"))
+	}
+	buffer := rt.NewArrayBuffer(append([]byte(nil), data...))
+	value, err := constructor(nil, rt.ToValue(buffer))
+	if err != nil {
+		panic(err)
+	}
+	return value
 }
 
 func stripUTF8BOM(data []byte, final bool) ([]byte, bool) {
