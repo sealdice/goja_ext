@@ -49,6 +49,7 @@ func Exports(rt *goja.Runtime) *goja.Object {
 			return exports
 		}
 	}
+	ensureAsyncIteratorSymbol(rt)
 	value, err := rt.RunProgram(eventsProgram)
 	if err != nil {
 		panic(fmt.Errorf("events: initialize: %w", err))
@@ -61,6 +62,21 @@ func Exports(rt *goja.Runtime) *goja.Object {
 		panic(err)
 	}
 	return exports
+}
+
+func ensureAsyncIteratorSymbol(rt *goja.Runtime) {
+	symbolObj := rt.Get("Symbol").ToObject(rt)
+	if value := symbolObj.Get("asyncIterator"); value != nil && !goja.IsUndefined(value) {
+		return
+	}
+	symbolFor, ok := goja.AssertFunction(symbolObj.Get("for"))
+	if !ok {
+		return
+	}
+	sym, err := symbolFor(symbolObj, rt.ToValue("Symbol.asyncIterator"))
+	if err == nil {
+		_ = symbolObj.Set("asyncIterator", sym)
+	}
 }
 
 // RegisterWithRegistry registers events and node:events on a specific registry.
