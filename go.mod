@@ -6,7 +6,7 @@ toolchain go1.24.5
 
 require (
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217
-	github.com/dop251/goja v0.0.0-20250630131328-58d95d85e994
+	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/afero v1.9.5
