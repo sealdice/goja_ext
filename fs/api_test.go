@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -78,6 +79,31 @@ func TestRuntimeCoreRejectsConflictingCwdAndChunkSize(t *testing.T) {
 			t.Errorf("%s conflict error = %v", name, err)
 		}
 	}
+}
+
+func TestEnableWithLoopRejectsForeignRuntime(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	err := EnableWithLoop(goja.New(), loop, WithFS(afero.NewMemMapFs()))
+	if err == nil || !strings.Contains(err.Error(), "different runtime") {
+		t.Fatalf("foreign loop error = %v", err)
+	}
+}
+
+func TestRequireWithLoopRejectsForeignRuntime(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	loader := RequireWithLoop(loop, WithFS(afero.NewMemMapFs()))
+	rt := goja.New()
+	module := rt.NewObject()
+	_ = module.Set("exports", rt.NewObject())
+	defer func() {
+		value := recover()
+		if value == nil || !strings.Contains(fmt.Sprint(value), "different runtime") {
+			t.Fatalf("foreign loader panic = %v", value)
+		}
+	}()
+	loader(rt, module)
 }
 
 func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {

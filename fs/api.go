@@ -584,13 +584,13 @@ func (m *moduleInstance) promiseCall(
 			}
 			_ = resolve(convert(rt, value))
 		}
-		if m.loop != nil {
-			_ = m.loop.RunOnLoop(settle)
+		if m.scheduler != nil {
+			_ = m.scheduler.RunOnLoop(settle)
 		} else {
 			settle(m.rt)
 		}
 	}
-	if m.loop == nil {
+	if m.scheduler == nil {
 		run()
 	} else {
 		go run()

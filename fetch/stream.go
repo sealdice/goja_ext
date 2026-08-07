@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/runtimehost"
 	"github.com/sealdice/goja_ext/streams"
 )
 
@@ -15,9 +15,11 @@ import (
 // callback (running on the loop thread) never blocks. The queue is bounded so
 // long-lived streams (e.g. SSE) do not buffer unboundedly.
 type streamingBody struct {
-	loop      *eventloop.EventLoop
+	scheduler runtimehost.Scheduler
 	body      io.ReadCloser
 	highWater int
+	cleanup   func()
+	cleanOnce sync.Once
 
 	mu       sync.Mutex
 	queue    [][]byte
@@ -30,11 +32,12 @@ type streamingBody struct {
 	closedCh chan struct{}
 }
 
-func newStreamingBody(loop *eventloop.EventLoop, body io.ReadCloser) *streamingBody {
+func newStreamingBody(scheduler runtimehost.Scheduler, body io.ReadCloser, cleanup func()) *streamingBody {
 	return &streamingBody{
-		loop:      loop,
+		scheduler: scheduler,
 		body:      body,
 		highWater: 16,
+		cleanup:   cleanup,
 		more:      make(chan struct{}, 1),
 		closedCh:  make(chan struct{}),
 	}
@@ -79,7 +82,7 @@ func (b *streamingBody) pump() {
 			waiters := b.waiters
 			b.waiters = nil
 			b.mu.Unlock()
-			b.wake(waiters)
+			b.wake(waiters, false)
 		}
 
 		if err != nil {
@@ -89,20 +92,31 @@ func (b *streamingBody) pump() {
 			waiters := b.waiters
 			b.waiters = nil
 			b.mu.Unlock()
-			b.wake(waiters)
+			b.wake(waiters, true)
 			_ = b.body.Close()
 			return
 		}
 	}
 }
 
-func (b *streamingBody) wake(waiters []func(interface{}) error) {
-	if len(waiters) == 0 {
+func (b *streamingBody) wake(waiters []func(interface{}) error, terminal bool) {
+	if len(waiters) == 0 && !terminal {
 		return
 	}
-	b.loop.RunOnLoop(func(*goja.Runtime) {
+	b.scheduler.RunOnLoop(func(*goja.Runtime) {
 		for _, r := range waiters {
 			_ = r(goja.Undefined())
+		}
+		if terminal {
+			b.runCleanup()
+		}
+	})
+}
+
+func (b *streamingBody) runCleanup() {
+	b.cleanOnce.Do(func() {
+		if b.cleanup != nil {
+			b.cleanup()
 		}
 	})
 }
@@ -125,6 +139,7 @@ func (b *streamingBody) close() {
 	if body != nil {
 		_ = body.Close()
 	}
+	b.runCleanup()
 }
 
 func (b *streamingBody) signalMore() {
@@ -150,6 +165,7 @@ func (b *streamingBody) pull(rt *goja.Runtime, controller *goja.Object) goja.Val
 	if b.done {
 		err := b.err
 		b.mu.Unlock()
+		b.runCleanup()
 		if err != nil && !errors.Is(err, io.EOF) {
 			callFetchController(rt, controller, "error", rt.NewGoError(err))
 		} else {
@@ -165,8 +181,8 @@ func (b *streamingBody) pull(rt *goja.Runtime, controller *goja.Object) goja.Val
 
 // fetchReadableStream builds a canonical ReadableStream that streams the given
 // HTTP body. The pull path never blocks the loop thread.
-func fetchReadableStream(rt *goja.Runtime, loop *eventloop.EventLoop, body io.ReadCloser) goja.Value {
-	b := newStreamingBody(loop, body)
+func fetchReadableStream(rt *goja.Runtime, scheduler runtimehost.Scheduler, body io.ReadCloser, cleanup func()) goja.Value {
+	b := newStreamingBody(scheduler, body, cleanup)
 	b.start()
 	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
 		Pull: func(controller *goja.Object) goja.Value {

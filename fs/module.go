@@ -16,10 +16,10 @@ const (
 )
 
 type moduleInstance struct {
-	rt      *goja.Runtime
-	core    *Core
-	loop    *eventloop.EventLoop
-	streams bool
+	rt        *goja.Runtime
+	core      *Core
+	scheduler runtimehost.Scheduler
+	streams   bool
 }
 
 var (
@@ -36,9 +36,9 @@ type runtimeCoreState struct {
 }
 
 type runtimeExportsState struct {
-	exports *goja.Object
-	loop    *eventloop.EventLoop
-	streams bool
+	exports   *goja.Object
+	scheduler runtimehost.Scheduler
+	streams   bool
 }
 
 func RequireWithOptions(opts ...Option) require.ModuleLoader {
@@ -96,6 +96,10 @@ func registerLoaders(
 func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option) require.ModuleLoader {
 	options := append([]Option(nil), opts...)
 	return func(rt *goja.Runtime, module *goja.Object) {
+		scheduler, err := schedulerForRuntime(rt, loop)
+		if err != nil {
+			panic(fmt.Errorf("fs: %w", err))
+		}
 		core, err := coreForRuntime(rt, options...)
 		if err != nil {
 			panic(fmt.Errorf("fs: configure backend: %w", err))
@@ -104,7 +108,7 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 		if err != nil {
 			panic(fmt.Errorf("fs: configure exports: %w", err))
 		}
-		if cached, err := cachedExports(rt, promises, loop, cfg); err != nil {
+		if cached, err := cachedExports(rt, promises, scheduler, cfg); err != nil {
 			panic(err)
 		} else if cached != nil {
 			if err := module.Set("exports", cached); err != nil {
@@ -112,7 +116,7 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 			}
 			return
 		}
-		instance := &moduleInstance{rt: rt, core: core, loop: loop, streams: cfg.withStream}
+		instance := &moduleInstance{rt: rt, core: core, scheduler: scheduler, streams: cfg.withStream}
 		exports := module.Get("exports").ToObject(rt)
 		if promises {
 			bindPromiseExports(instance, exports)
@@ -120,14 +124,14 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 			bindFullExports(instance, exports)
 		}
 		runtimehost.Store(rt, exportsKey(promises), &runtimeExportsState{
-			exports: exports,
-			loop:    loop,
-			streams: cfg.withStream,
+			exports:   exports,
+			scheduler: scheduler,
+			streams:   cfg.withStream,
 		})
 	}
 }
 
-func cachedExports(rt *goja.Runtime, promises bool, loop *eventloop.EventLoop, cfg config) (*goja.Object, error) {
+func cachedExports(rt *goja.Runtime, promises bool, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
 	value, ok := runtimehost.Load(rt, exportsKey(promises))
 	if !ok {
 		return nil, nil
@@ -136,7 +140,7 @@ func cachedExports(rt *goja.Runtime, promises bool, loop *eventloop.EventLoop, c
 	if !ok {
 		return nil, errors.New("fs: invalid cached exports state")
 	}
-	if state.loop != loop {
+	if state.scheduler != scheduler {
 		return nil, errors.New("fs: exports already use a different scheduler")
 	}
 	if !promises && state.streams != cfg.withStream {
@@ -189,6 +193,10 @@ func EnableWithLoop(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option)
 }
 
 func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
+	scheduler, err := schedulerForRuntime(rt, loop)
+	if err != nil {
+		return fmt.Errorf("fs: %w", err)
+	}
 	core, err := coreForRuntime(rt, opts...)
 	if err != nil {
 		return err
@@ -197,23 +205,23 @@ func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
 	if err != nil {
 		return err
 	}
-	if cached, err := cachedGlobalExports(rt, loop, cfg); err != nil {
+	if cached, err := cachedGlobalExports(rt, scheduler, cfg); err != nil {
 		return err
 	} else if cached != nil {
 		return rt.Set("fs", cached)
 	}
-	instance := &moduleInstance{rt: rt, core: core, loop: loop, streams: cfg.withStream}
+	instance := &moduleInstance{rt: rt, core: core, scheduler: scheduler, streams: cfg.withStream}
 	exports := rt.NewObject()
 	bindFullExports(instance, exports)
 	runtimehost.Store(rt, runtimeGlobalExportsKey, &runtimeExportsState{
-		exports: exports,
-		loop:    loop,
-		streams: cfg.withStream,
+		exports:   exports,
+		scheduler: scheduler,
+		streams:   cfg.withStream,
 	})
 	return rt.Set("fs", exports)
 }
 
-func cachedGlobalExports(rt *goja.Runtime, loop *eventloop.EventLoop, cfg config) (*goja.Object, error) {
+func cachedGlobalExports(rt *goja.Runtime, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
 	value, ok := runtimehost.Load(rt, runtimeGlobalExportsKey)
 	if !ok {
 		return nil, nil
@@ -222,13 +230,26 @@ func cachedGlobalExports(rt *goja.Runtime, loop *eventloop.EventLoop, cfg config
 	if !ok {
 		return nil, errors.New("fs: invalid cached global exports state")
 	}
-	if state.loop != loop {
+	if state.scheduler != scheduler {
 		return nil, errors.New("fs: global exports already use a different scheduler")
 	}
 	if state.streams != cfg.withStream {
 		return nil, errors.New("fs: global exports already use a different stream mode")
 	}
 	return state.exports, nil
+}
+
+func schedulerForRuntime(rt *goja.Runtime, loop *eventloop.EventLoop) (runtimehost.Scheduler, error) {
+	if loop == nil {
+		return nil, nil
+	}
+	if err := runtimehost.ValidateScheduler(rt, loop); err != nil {
+		return nil, err
+	}
+	if err := runtimehost.BindScheduler(rt, loop); err != nil {
+		return nil, err
+	}
+	return loop, nil
 }
 
 func Require(rt *goja.Runtime, module *goja.Object) {

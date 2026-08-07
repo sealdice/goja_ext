@@ -12,6 +12,15 @@ import (
 	"github.com/sealdice/goja_ext/eventloop"
 )
 
+func TestEnableRejectsForeignEventLoop(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	err := Enable(goja.New(), loop)
+	if err == nil || !strings.Contains(err.Error(), "different runtime") {
+		t.Fatalf("foreign loop error = %v", err)
+	}
+}
+
 func startLoop(t *testing.T) *eventloop.EventLoop {
 	t.Helper()
 	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))

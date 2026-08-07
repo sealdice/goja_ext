@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,6 +73,94 @@ func TestFetchResponseUsesCanonicalPrototypes(t *testing.T) {
 	}
 	if got := gstr(t, loop, "__canonical"); got != "true" {
 		t.Fatalf("canonical prototype check = %q", got)
+	}
+}
+
+func TestEnableFetchRejectsForeignEventLoop(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	err := EnableFetch(goja.New(), loop)
+	if err == nil || !strings.Contains(err.Error(), "different runtime") {
+		t.Fatalf("foreign loop error = %v", err)
+	}
+}
+
+func TestFetchAlreadyAbortedStandardSignal(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte("unexpected"))
+	}))
+	defer srv.Close()
+
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(vm *goja.Runtime) {
+		Enable(vm)
+		if err := EnableFetch(vm, loop); err != nil {
+			t.Fatal(err)
+		}
+		_, err := vm.RunString(`
+			globalThis.__done = false;
+			const signal = {
+				aborted: true,
+				reason: "already stopped",
+				addEventListener() { throw new Error("must not subscribe"); }
+			};
+			fetch("` + srv.URL + `", { signal }).then(
+				() => { globalThis.__abortResult = "resolved"; },
+				(reason) => { globalThis.__abortResult = String(reason); }
+			).finally(() => { globalThis.__done = true; });
+		`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitBool(t, loop, "__done")
+	if got := gstr(t, loop, "__abortResult"); got != "already stopped" {
+		t.Fatalf("abort result = %q", got)
+	}
+	if count := requests.Load(); count != 0 {
+		t.Fatalf("aborted fetch reached server %d times", count)
+	}
+}
+
+func TestFetchRemovesAbortListenerAfterBodyCompletes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("complete"))
+	}))
+	defer srv.Close()
+
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(vm *goja.Runtime) {
+		Enable(vm)
+		if err := EnableFetch(vm, loop); err != nil {
+			t.Fatal(err)
+		}
+		_, err := vm.RunString(`
+			globalThis.__done = false;
+			let added = 0;
+			let removed = 0;
+			let subscribed;
+			const signal = {
+				aborted: false,
+				reason: undefined,
+				addEventListener(type, fn) { added++; subscribed = fn; },
+				removeEventListener(type, fn) {
+					if (type === "abort" && fn === subscribed) removed++;
+				}
+			};
+			fetch("` + srv.URL + `", { signal }).then((response) => response.text()).then(
+				(text) => { globalThis.__cleanup = [text, added, removed].join("|"); },
+				(error) => { globalThis.__cleanup = "ERR:" + error; }
+			).finally(() => { globalThis.__done = true; });
+		`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitBool(t, loop, "__done")
+	if got := gstr(t, loop, "__cleanup"); got != "complete|1|1" {
+		t.Fatalf("abort listener lifecycle = %q", got)
 	}
 }
 

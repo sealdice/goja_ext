@@ -14,6 +14,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/gorilla/websocket"
 	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 // Logger 复用 eventloop 的日志接口，调用方可共用同一实例。
@@ -65,8 +66,8 @@ type (
 
 	// WebSocket 表示WebSocket模块的一个实例
 	WebSocket struct {
-		rt   *goja.Runtime
-		loop *eventloop.EventLoop
+		rt        *goja.Runtime
+		scheduler runtimehost.Scheduler
 	}
 	WebSocketManager struct {
 		connections []*WebSocketConnection
@@ -116,10 +117,28 @@ func New() *WebSocketModule {
 
 // NewInstance 为给定的goja运行时创建一个新的WebSocket实例
 func (m *WebSocketModule) NewInstance(rt *goja.Runtime, loop *eventloop.EventLoop) *WebSocket {
-	return &WebSocket{
-		rt:   rt,
-		loop: loop,
+	instance, err := m.NewInstanceChecked(rt, loop)
+	if err != nil {
+		panic(err)
 	}
+	return instance
+}
+
+// NewInstanceChecked creates an instance after verifying that loop owns rt.
+func (m *WebSocketModule) NewInstanceChecked(rt *goja.Runtime, loop *eventloop.EventLoop) (*WebSocket, error) {
+	if loop == nil {
+		return nil, errors.New("websocket: event loop is required")
+	}
+	if err := runtimehost.ValidateScheduler(rt, loop); err != nil {
+		return nil, fmt.Errorf("websocket: %w", err)
+	}
+	if err := runtimehost.BindScheduler(rt, loop); err != nil {
+		return nil, fmt.Errorf("websocket: %w", err)
+	}
+	return &WebSocket{
+		rt:        rt,
+		scheduler: loop,
+	}, nil
 }
 
 // Exports 返回模块的导出对象 - 直接返回WebSocket构造函数
@@ -150,7 +169,7 @@ func (ws *WebSocket) Exports() goja.Value {
 // WebSocketConnection 是返回给JavaScript的WebSocket连接表示
 type WebSocketConnection struct {
 	rt           *goja.Runtime
-	loop         *eventloop.EventLoop
+	scheduler    runtimehost.Scheduler
 	ctx          context.Context
 	conn         *websocket.Conn
 	connMu       sync.RWMutex
@@ -271,13 +290,13 @@ func (ws *WebSocket) NewWebSocketConnection(call goja.FunctionCall) goja.Value {
 		}
 	}
 
-	if ws.loop == nil {
+	if ws.scheduler == nil {
 		panic(rt.NewTypeError("WebSocket requires event loop. Please provide eventloop when calling Enable()."))
 	}
 
 	conn := &WebSocketConnection{
 		rt:             rt,
-		loop:           ws.loop,
+		scheduler:      ws.scheduler,
 		url:            url,
 		protocol:       "",
 		readyState:     Connecting,
@@ -621,10 +640,13 @@ func (conn *WebSocketConnection) webSocketCloseConnection() {
 	})
 }
 
-func Enable(rt *goja.Runtime, loop *eventloop.EventLoop) {
+func Enable(rt *goja.Runtime, loop *eventloop.EventLoop) error {
 	module := New()
-	instance := module.NewInstance(rt, loop)
-	_ = rt.Set("WebSocket", instance.Exports())
+	instance, err := module.NewInstanceChecked(rt, loop)
+	if err != nil {
+		return err
+	}
+	return rt.Set("WebSocket", instance.Exports())
 }
 
 func (conn *WebSocketConnection) addEventListener(eventType string, listener goja.Value) {
@@ -673,10 +695,10 @@ func (conn *WebSocketConnection) snapshotListeners(eventType string) []goja.Valu
 }
 
 func (conn *WebSocketConnection) dispatchEvent(eventType string, populate func(vm *goja.Runtime, event *goja.Object)) {
-	if conn.loop == nil {
+	if conn.scheduler == nil {
 		return
 	}
-	conn.loop.RunOnLoop(func(vm *goja.Runtime) {
+	conn.scheduler.RunOnLoop(func(vm *goja.Runtime) {
 		event := vm.NewObject()
 		_ = event.Set("target", conn.jsObject)
 		_ = event.Set("currentTarget", conn.jsObject)

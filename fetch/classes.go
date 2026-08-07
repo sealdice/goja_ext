@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 type headersData struct {
@@ -365,6 +365,7 @@ type responseData struct {
 	body       io.ReadCloser
 	url        string
 	method     string
+	cleanup    func()
 }
 
 func newResponseCtor(rt *goja.Runtime) func(call goja.ConstructorCall) *goja.Object {
@@ -398,7 +399,7 @@ func newResponseCtor(rt *goja.Runtime) func(call goja.ConstructorCall) *goja.Obj
 	}
 }
 
-func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, loop *eventloop.EventLoop) {
+func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, scheduler runtimehost.Scheduler) {
 	_ = obj.Set("status", data.status)
 	_ = obj.Set("statusText", data.statusText)
 	_ = obj.Set("ok", data.status >= 200 && data.status < 300)
@@ -414,7 +415,7 @@ func bindResponse(rt *goja.Runtime, obj *goja.Object, data *responseData, loop *
 	var bodyStream goja.Value
 	switch {
 	case data.body != nil:
-		bodyStream = fetchReadableStream(rt, loop, data.body)
+		bodyStream = fetchReadableStream(rt, scheduler, data.body, data.cleanup)
 	case data.bodyBytes != nil:
 		bodyStream = bufferedReadableStream(rt, data.bodyBytes)
 	default:
@@ -453,9 +454,9 @@ func newHeadersObject(rt *goja.Runtime, data *headersData) *goja.Object {
 	return obj
 }
 
-func newResponseObject(rt *goja.Runtime, data *responseData, loop *eventloop.EventLoop) *goja.Object {
+func newResponseObject(rt *goja.Runtime, data *responseData, scheduler runtimehost.Scheduler) *goja.Object {
 	obj := newCanonicalInstance(rt, "Response")
-	bindResponse(rt, obj, data, loop)
+	bindResponse(rt, obj, data, scheduler)
 	return obj
 }
 

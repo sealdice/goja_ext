@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/dop251/goja"
 	"github.com/go-resty/resty/v2"
 	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 type fetchRequestData struct {
@@ -25,6 +27,7 @@ type fetchRequestData struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	abort   *fetchAbortState
+	cleanup func()
 }
 
 type fetchAbortState struct {
@@ -51,6 +54,12 @@ func EnableFetch(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...FetchOptio
 	if loop == nil {
 		return errors.New("JS event loop is required for fetch")
 	}
+	if err := runtimehost.ValidateScheduler(rt, loop); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	if err := runtimehost.BindScheduler(rt, loop); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
 	client := newClient(opts...)
 	if err := rt.Set("fetch", newFetchFn(rt, loop, client)); err != nil {
 		return err
@@ -58,7 +67,7 @@ func EnableFetch(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...FetchOptio
 	return rt.Set("EventSource", newEventSourceCtor(rt, loop, client))
 }
 
-func newFetchFn(rt *goja.Runtime, loop *eventloop.EventLoop, client *resty.Client) func(goja.FunctionCall) goja.Value {
+func newFetchFn(rt *goja.Runtime, scheduler runtimehost.Scheduler, client *resty.Client) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := rt.NewPromise()
 
@@ -70,21 +79,35 @@ func newFetchFn(rt *goja.Runtime, loop *eventloop.EventLoop, client *resty.Clien
 
 		go func() {
 			responseData, err := doFetchRequest(requestData, client)
-			loop.RunOnLoop(func(loopRT *goja.Runtime) {
+			scheduled := scheduler.RunOnLoop(func(loopRT *goja.Runtime) {
 				switch {
 				case err == nil:
-					response := newResponseObject(loopRT, responseData, loop)
+					response := newResponseObject(loopRT, responseData, scheduler)
 					_ = resolve(response)
 				case requestData.abort.get() != nil:
+					requestData.detachAbortListener()
 					_ = reject(requestData.abort.get())
 				default:
+					requestData.detachAbortListener()
 					_ = reject(loopRT.NewTypeError(err.Error()))
 				}
 			})
+			if !scheduled && responseData != nil && responseData.body != nil {
+				_ = responseData.body.Close()
+			}
 		}()
 
 		return rt.ToValue(promise)
 	}
+}
+
+func (data *fetchRequestData) detachAbortListener() {
+	if data.cleanup == nil {
+		return
+	}
+	cleanup := data.cleanup
+	data.cleanup = nil
+	cleanup()
 }
 
 func parseFetchRequest(rt *goja.Runtime, input goja.Value, init goja.Value) (*fetchRequestData, error) {
@@ -163,20 +186,35 @@ func attachFetchAbortSignal(rt *goja.Runtime, data *fetchRequestData, signal goj
 	if signalObj == nil {
 		return
 	}
+	data.detachAbortListener()
+	if aborted := signalObj.Get("aborted"); aborted != nil && aborted.ToBoolean() {
+		data.abort.set(signalObj.Get("reason"))
+		data.cancel()
+		return
+	}
 	addEventListener, ok := goja.AssertFunction(signalObj.Get("addEventListener"))
 	if !ok {
 		return
 	}
 	cancelFn := rt.ToValue(func(call goja.FunctionCall) goja.Value {
-		if eventObj, ok := call.Argument(0).(*goja.Object); ok {
-			data.abort.set(eventObj.Get("reason"))
-		} else {
-			data.abort.set(call.Argument(0))
+		reason := signalObj.Get("reason")
+		if reason == nil || goja.IsUndefined(reason) {
+			if eventObj, ok := call.Argument(0).(*goja.Object); ok {
+				reason = eventObj.Get("reason")
+			} else {
+				reason = call.Argument(0)
+			}
 		}
+		data.abort.set(reason)
 		data.cancel()
 		return goja.Undefined()
 	})
 	_, _ = addEventListener(signalObj, rt.ToValue("abort"), cancelFn)
+	if removeEventListener, ok := goja.AssertFunction(signalObj.Get("removeEventListener")); ok {
+		data.cleanup = func() {
+			_, _ = removeEventListener(signalObj, rt.ToValue("abort"), cancelFn)
+		}
+	}
 }
 
 func bytesFromBodyValue(headers *headersData, body goja.Value) ([]byte, error) {
@@ -280,6 +318,7 @@ func doFetchRequest(data *fetchRequestData, client *resty.Client) (*responseData
 		body:       resp.RawBody(),
 		url:        data.url,
 		method:     data.method,
+		cleanup:    data.detachAbortListener,
 	}, nil
 }
 
