@@ -151,6 +151,28 @@ func NewEventLoop(opts ...Option) *EventLoop {
 	_ = vm.Set("clearTimeout", loop.clearTimeout)
 	_ = vm.Set("clearInterval", loop.clearInterval)
 	_ = vm.Set("clearImmediate", loop.clearImmediate)
+	_ = vm.Set("queueMicrotask", func(call goja.FunctionCall) goja.Value {
+		fn := call.Argument(0)
+		if _, ok := goja.AssertFunction(fn); !ok {
+			panic(vm.NewTypeError("queueMicrotask expects a function"))
+		}
+		resolveFn, ok := goja.AssertFunction(vm.Get("Promise").ToObject(vm).Get("resolve"))
+		if !ok {
+			return goja.Undefined()
+		}
+		promise, err := resolveFn(vm.Get("Promise").ToObject(vm))
+		if err != nil {
+			panic(err)
+		}
+		thenFn, ok := goja.AssertFunction(promise.ToObject(vm).Get("then"))
+		if !ok {
+			return goja.Undefined()
+		}
+		if _, err := thenFn(promise.ToObject(vm), fn); err != nil {
+			panic(err)
+		}
+		return goja.Undefined()
+	})
 
 	return loop
 }
