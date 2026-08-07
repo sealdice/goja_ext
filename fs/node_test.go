@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -174,11 +175,19 @@ func TestCreateReadStreamHighWaterMark(t *testing.T) {
 		const chunks = [];
 		const rs = fs.createReadStream("big", { highWaterMark: 1024 });
 		rs.on("data", function (c) { chunks.push(c); });
-		rs.on("end", function () { globalThis.__result = String(chunks.length > 1); });
+		rs.on("end", function () { globalThis.__result = String(chunks.length); });
 		rs.on("error", function (e) { globalThis.__result = "ERR:" + e.message; });
 	`)
-	if result != "true" {
-		t.Fatalf("unexpected highWaterMark chunking result: %s", result)
+	// highWaterMark=1024 on 70000 bytes must yield many chunks (>=10).
+	// Before the fix, highWaterMark was ignored (default 65536) → only 2 chunks.
+	count := 0
+	for _, r := range result {
+		if r >= '0' && r <= '9' {
+			count = count*10 + int(r-'0')
+		}
+	}
+	if !strings.HasPrefix(result, "ERR") && count < 10 {
+		t.Fatalf("highWaterMark not respected: expected >=10 chunks, got %s", result)
 	}
 }
 

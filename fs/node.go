@@ -254,8 +254,8 @@ const nodeReadStreamSource = `(function (Readable, readFn, closeFn, opts) {
 	let position = opts.start;
 	stream = new Readable({
 		highWaterMark: opts.highWaterMark || 65536,
-		read(size) {
-			let want = size;
+		read(cb) {
+			let want = opts.highWaterMark || 65536;
 			if (opts.end !== null) {
 				if (position > opts.end) { stream.push(null); return; }
 				want = Math.min(want, opts.end - position + 1);
@@ -288,6 +288,7 @@ func (m *moduleInstance) createReadStream(call goja.FunctionCall) goja.Value {
 	options := objectOrEmpty(m.rt, call.Argument(1))
 	enc := propertyString(options, "encoding", "")
 	start := propertyInt(options, "start", 0)
+	hwm := propertyInt(options, "highWaterMark", 0)
 	endValue := goja.Null()
 	if end := propertyIntOrNull(options, "end"); end >= 0 {
 		endValue = m.rt.ToValue(end)
@@ -341,9 +342,10 @@ func (m *moduleInstance) createReadStream(call goja.FunctionCall) goja.Value {
 		readFn,
 		closeFn,
 		rt.ToValue(map[string]interface{}{
-			"start":    start,
-			"end":      endValue,
-			"encoding": enc,
+			"start":         start,
+			"end":           endValue,
+			"encoding":      enc,
+			"highWaterMark": hwm,
 		}),
 	)
 	if err != nil {
