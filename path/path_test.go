@@ -85,3 +85,143 @@ func TestPathNodeAlias(t *testing.T) {
 		t.Fatalf("got %s", out)
 	}
 }
+
+func TestPathWin32Relative(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.relative("C:\\a\\b","C:\\a\\x"),
+			w.relative("C:\\a","C:\\a"),
+			w.relative("C:\\a","D:\\a"),
+		]);
+	`)
+	want := `["..\\x","","D:\\a"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32Dirname(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.dirname("C:\\a\\b\\c"),
+			w.dirname("C:\\a"),
+			w.dirname("a"),
+		]);
+	`)
+	want := `["C:\\a\\b","C:\\",""]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32Extname(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.extname("C:\\a\\b.txt"),
+			w.extname(".bashrc"),
+			w.extname("a."),
+		]);
+	`)
+	want := `[".txt","",""]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32Format(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.format({root:"C:\\",base:"a.txt"}),
+			w.format({dir:"C:\\a\\b",base:"c.txt"}),
+			w.format({dir:"C:\\a\\",base:"c"}),
+		]);
+	`)
+	want := `["C:\\a.txt","C:\\a\\b\\c.txt","C:\\a\\c"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32ParseFull(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		const parsed = w.parse("C:\\Users\\x\\a.txt");
+		JSON.stringify([parsed.root, parsed.dir, parsed.base, parsed.name, parsed.ext]);
+	`)
+	want := `["C:\\","C:\\Users\\x","a.txt","a",".txt"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32BasenameExt(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.basename("C:\\a\\b.txt",".txt"),
+			w.basename("C:\\a\\b.txt",".js"),
+		]);
+	`)
+	want := `["b","b.txt"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32SepDelimiter(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([w.sep(), w.delimiter()]);
+	`)
+	want := `["\\",";"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32IsAbsoluteVariants(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.isAbsolute("C:/x"),
+			w.isAbsolute("\\\\srv\\share"),
+			w.isAbsolute("C|x"),
+		]);
+	`)
+	want := `[true,true,false]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32NormalizeEdges(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.normalize(""),
+			w.normalize("C:/a/b"),
+		]);
+	`)
+	want := `[".","C:\\a\\b"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestPathWin32UNC(t *testing.T) {
+	out := run(t, `
+		const w = require("path").win32;
+		JSON.stringify([
+			w.isAbsolute("\\\\srv\\share"),
+			w.normalize("\\\\srv\\share\\..\\a"),
+		]);
+	`)
+	want := `[true,"\\\\srv\\share\\a"]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
