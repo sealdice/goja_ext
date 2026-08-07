@@ -13,23 +13,21 @@ JavaScript。
 - `Response`
 - `FormData`
 
-`EnableFetch` 另外注册全局 `fetch(url, init)` 函数。它返回
-JavaScript `Promise<Response>`，因此必须提供项目的
+`EnableFetch` 另外注册全局 `fetch(url, init)` 函数与 `EventSource`（SSE）。
+`fetch` 返回 JavaScript `Promise<Response>`，因此必须提供项目的
 `eventloop.EventLoop`。
 
 ## 支持范围
 
 - 常用请求方法和请求头
 - 字符串、ArrayBuffer、URLSearchParams、FormData 请求体
-- `Response.text()`
-- `Response.json()`
-- `Response.arrayBuffer()`
+- `Response.body`：**canonical `ReadableStream`**（`stream/web`），逐块流式交付，天然支持背压；`text()` / `json()` / `arrayBuffer()` 消费该流（浏览器语义：body 只能消费一次）
+- **SSE**：`new EventSource(url)`，支持 `message`/`open`/`error` 事件、自定义事件名、自动重连（`retry` 字段）、`Last-Event-ID`、`close()`
 - `Headers`、`Request`、`Response`、`FormData` 的基础操作
 - 通过 `AbortSignal` 取消正在执行的请求
 - 超时、代理、自定义 HTTP Client 和 Transport
 
-当前实现不提供流式请求体或流式响应体，API 范围也不是完整的浏览器
-Fetch 标准实现。
+API 范围不是完整的浏览器 Fetch 标准实现（例如 `Response.body` 的 cancel 语义、`mode`/`credentials` 的完整约束未实现）。
 
 ## Go API
 
@@ -97,4 +95,30 @@ const request = fetch("https://example.com/data", {
 });
 
 controller.abort("request cancelled");
+```
+
+### SSE 示例
+
+```javascript
+const es = new EventSource("https://example.com/events");
+
+es.onopen = () => console.log("connected");
+es.onmessage = (event) => console.log("data:", event.data);
+es.addEventListener("custom", (event) => console.log("custom:", event.data));
+
+// 取消订阅 / 关闭
+// es.close();
+```
+
+### 流式读取响应体
+
+```javascript
+const response = await fetch("https://example.com/data");
+const reader = response.body.getReader();
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  // value 为 Uint8Array
+  console.log(value);
+}
 ```
