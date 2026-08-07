@@ -142,11 +142,100 @@ func TestTimersClearInterval(t *testing.T) {
 func TestTimersSchedulerWait(t *testing.T) {
 	out := runWithLoop(t, `
 		const tp = require("timers/promises");
-		tp.scheduler.wait(5, "done").then(function (v) {
-			globalThis.__result = String(v);
+		tp.scheduler.wait(5).then(function (v) {
+			globalThis.__result = String(v === undefined);
 		});
 	`)
-	if out != "done" {
+	if out != "true" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestTimersResolveGlobalsDynamically(t *testing.T) {
+	rt := goja.New()
+	registry := new(require.Registry)
+	registry.Enable(rt)
+	if _, err := rt.RunString(`globalThis.__timers = require("timers")`); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Set("setTimeout", func(goja.FunctionCall) goja.Value {
+		return rt.ToValue("late timer")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	value, err := rt.RunString(`__timers.setTimeout()`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "late timer" {
+		t.Fatalf("dynamic timer result = %q", got)
+	}
+}
+
+func TestTimersPromisesAbortAndCleanup(t *testing.T) {
+	out := runWithLoop(t, `
+		const tp = require("timers/promises");
+		let handler;
+		let removed = 0;
+		const signal = {
+			aborted: false,
+			reason: "stop",
+			addEventListener(type, fn) { handler = fn; },
+			removeEventListener(type, fn) { if (handler === fn) removed++; }
+		};
+		tp.setTimeout(100, "late", { signal }).then(
+			() => { globalThis.__result = "resolved"; },
+			(error) => { globalThis.__result = error.name + "|" + error.cause + "|" + removed; }
+		);
+		signal.aborted = true;
+		handler();
+	`)
+	if out != "AbortError|stop|1" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestTimersPromisesRefFalseUnrefsHandle(t *testing.T) {
+	out := runWithLoop(t, `
+		const original = globalThis.setTimeout;
+		let unrefed = 0;
+		globalThis.setTimeout = function (fn, delay) {
+			const handle = original(fn, delay);
+			const originalUnref = handle.unref;
+			handle.unref = function () { unrefed++; return originalUnref.call(handle); };
+			return handle;
+		};
+		const tp = require("timers/promises");
+		tp.setTimeout(1, "ok", { ref: false }).then(function (value) {
+			globalThis.__result = value + "|" + unrefed;
+		});
+		globalThis.setTimeout = original;
+	`)
+	if out != "ok|1" {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestTimersPromisesIntervalAbortRejectsPendingNext(t *testing.T) {
+	out := runWithLoop(t, `
+		const tp = require("timers/promises");
+		let handler;
+		let removed = 0;
+		const signal = {
+			aborted: false,
+			reason: 42,
+			addEventListener(type, fn) { handler = fn; },
+			removeEventListener(type, fn) { if (handler === fn) removed++; }
+		};
+		const iterator = tp.setInterval(100, "tick", { signal });
+		iterator.next().then(
+			() => { globalThis.__result = "resolved"; },
+			(error) => { globalThis.__result = error.name + "|" + error.cause + "|" + removed; }
+		);
+		signal.aborted = true;
+		handler();
+	`)
+	if out != "AbortError|42|1" {
 		t.Fatalf("unexpected: %s", out)
 	}
 }

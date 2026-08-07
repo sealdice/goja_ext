@@ -1,11 +1,21 @@
 package abort
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
+
+type directScheduler struct{ rt *goja.Runtime }
+
+func (s *directScheduler) Runtime() *goja.Runtime { return s.rt }
+func (s *directScheduler) RunOnLoop(fn func(*goja.Runtime)) bool {
+	fn(s.rt)
+	return true
+}
 
 func TestEnableAndRequireShareCanonicalConstructors(t *testing.T) {
 	rt := goja.New()
@@ -29,6 +39,9 @@ func TestEnableAndRequireShareCanonicalConstructors(t *testing.T) {
 func newRT(t *testing.T) *goja.Runtime {
 	t.Helper()
 	rt := goja.New()
+	if err := runtimehost.BindScheduler(rt, &directScheduler{rt: rt}); err != nil {
+		t.Fatal(err)
+	}
 	Enable(rt)
 	// setTimeout stub for AbortSignal.timeout
 	_ = rt.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
@@ -77,16 +90,17 @@ func TestAbortSignal_StaticAbortAndTimeout(t *testing.T) {
 
 func TestAbortSignal_ThrowIfAborted(t *testing.T) {
 	rt := newRT(t)
-	_, err := rt.RunString(`
+	value, err := rt.RunString(`
 		const c = new AbortController();
-		c.abort();
-		try { c.signal.throwIfAborted(); throw "not-aborted"; } catch (e) { globalThis.__caught = String(e); }
+		const reason = { marker: "same" };
+		c.abort(reason);
+		try { c.signal.throwIfAborted(); false; } catch (e) { e === reason; }
 	`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := rt.Get("__caught").String(); got == "not-aborted" {
-		t.Fatalf("expected throwIfAborted to throw, got %s", got)
+	if !value.ToBoolean() {
+		t.Fatal("throwIfAborted did not throw the original reason")
 	}
 }
 
@@ -123,7 +137,7 @@ func TestAbortController_DefaultReason(t *testing.T) {
 	}
 }
 
-func TestAbortSignal_ListenerAddedAfterAbortFiresImmediately(t *testing.T) {
+func TestAbortSignal_ListenerAddedAfterAbortDoesNotFire(t *testing.T) {
 	rt := newRT(t)
 	v, err := rt.RunString(`
 		const c = new AbortController();
@@ -135,8 +149,17 @@ func TestAbortSignal_ListenerAddedAfterAbortFiresImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.String() != "late" {
+	if !goja.IsNull(v) {
 		t.Fatalf("got %s", v.String())
+	}
+}
+
+func TestAbortSignalTimeoutRequiresScheduler(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	_, err := rt.RunString(`AbortSignal.timeout(1)`)
+	if err == nil || !strings.Contains(err.Error(), "scheduler") {
+		t.Fatalf("timeout error = %v", err)
 	}
 }
 

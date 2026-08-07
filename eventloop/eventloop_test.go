@@ -30,6 +30,31 @@ func TestEventLoopBindsRuntimeHostScheduler(t *testing.T) {
 	}
 }
 
+func TestTimerHandlesSupportRefAndUnref(t *testing.T) {
+	loop := NewEventLoop(EnableConsole(false))
+	defer loop.Stop()
+	var value goja.Value
+	var runErr error
+	loop.Run(func(vm *goja.Runtime) {
+		value, runErr = vm.RunString(`
+			const timer = setTimeout(function () {}, 5);
+			const before = timer.hasRef();
+			const unrefResult = timer.unref();
+			const middle = timer.hasRef();
+			const refResult = timer.ref();
+			const after = timer.hasRef();
+			clearTimeout(timer);
+			JSON.stringify([before, unrefResult === timer, middle, refResult === timer, after]);
+		`)
+	})
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if got := value.String(); got != `[true,true,false,true,true]` {
+		t.Fatalf("timer ref result = %s", got)
+	}
+}
+
 func TestRun(t *testing.T) {
 	t.Parallel()
 	const SCRIPT = `

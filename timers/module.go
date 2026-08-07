@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	ModuleName        = "timers"
+	ModuleName         = "timers"
 	PromisesModuleName = "timers/promises"
 )
 
@@ -45,13 +45,17 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 // has no event loop (no global timers), the exported function throws a clear
 // error when invoked.
 func bindTimer(rt *goja.Runtime, exports *goja.Object, name string) {
-	if fn := rt.Get(name); fn != nil && !goja.IsUndefined(fn) {
-		_ = exports.Set(name, fn)
-		return
-	}
-	_ = exports.Set(name, func(call goja.FunctionCall) goja.Value {
-		panic(rt.NewTypeError("timers require an event loop"))
+	getter := rt.ToValue(func(goja.FunctionCall) goja.Value {
+		if fn := rt.Get(name); fn != nil && !goja.IsUndefined(fn) && !goja.IsNull(fn) {
+			return fn
+		}
+		return rt.ToValue(func(goja.FunctionCall) goja.Value {
+			panic(rt.NewTypeError("timers require an event loop"))
+		})
 	})
+	if err := exports.DefineAccessorProperty(name, getter, goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE); err != nil {
+		panic(err)
+	}
 }
 
 func RequirePromises(rt *goja.Runtime, module *goja.Object) {

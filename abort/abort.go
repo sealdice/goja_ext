@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 type abortListener struct {
@@ -78,17 +79,23 @@ func newAbortSignalStatic(rt *goja.Runtime) *goja.Object {
 		return signalObj
 	})
 	_ = static.Set("timeout", func(call goja.FunctionCall) goja.Value {
+		if _, ok := runtimehost.SchedulerFor(rt); !ok {
+			panic(rt.NewTypeError("AbortSignal.timeout requires a runtime scheduler"))
+		}
 		ms := call.Argument(0).ToInteger()
 		sig := newSignal(rt)
 		signalObj := buildSignalObj(rt, sig)
-		if timer := rt.Get("setTimeout"); timer != nil {
-			if fn, ok := goja.AssertFunction(timer); ok {
-				cb := func(call goja.FunctionCall) goja.Value {
-					sig.doAbort(rt.ToValue("TimeoutError"))
-					return goja.Undefined()
-				}
-				_, _ = fn(goja.Undefined(), rt.ToValue(cb), rt.ToValue(ms))
-			}
+		timer := rt.Get("setTimeout")
+		fn, ok := goja.AssertFunction(timer)
+		if !ok {
+			panic(rt.NewTypeError("AbortSignal.timeout requires the setTimeout capability"))
+		}
+		cb := func(goja.FunctionCall) goja.Value {
+			sig.doAbort(rt.ToValue("TimeoutError"))
+			return goja.Undefined()
+		}
+		if _, err := fn(goja.Undefined(), rt.ToValue(cb), rt.ToValue(ms)); err != nil {
+			panic(err)
 		}
 		return signalObj
 	})
@@ -119,14 +126,10 @@ func buildSignalObj(rt *goja.Runtime, sig *abortSignal) *goja.Object {
 			}))
 		}
 		sig.mu.Lock()
-		if sig.aborted {
-			reason := sig.reason
-			sig.mu.Unlock()
-			fn(reason)
-		} else {
+		if !sig.aborted {
 			sig.listeners = append(sig.listeners, abortListener{src: call.Argument(1), fn: fn})
-			sig.mu.Unlock()
 		}
+		sig.mu.Unlock()
 		return goja.Undefined()
 	})
 
@@ -154,7 +157,7 @@ func buildSignalObj(rt *goja.Runtime, sig *abortSignal) *goja.Object {
 		reason := sig.reason
 		sig.mu.Unlock()
 		if aborted {
-			panic(rt.NewTypeError("Aborted: " + reason.String()))
+			panic(reason)
 		}
 		return goja.Undefined()
 	})
