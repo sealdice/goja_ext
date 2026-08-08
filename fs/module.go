@@ -1,11 +1,13 @@
 package fs
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/eventloop"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 const (
@@ -14,17 +16,30 @@ const (
 )
 
 type moduleInstance struct {
-	rt      *goja.Runtime
-	core    *Core
-	loop    *eventloop.EventLoop
-	streams bool
+	rt        *goja.Runtime
+	core      *Core
+	scheduler runtimehost.Scheduler
+	streams   bool
 }
 
 var (
-	runtimeCoreSymbol            = goja.NewSymbol("goja_ext.fs.core")
-	runtimeFullExportsSymbol     = goja.NewSymbol("goja_ext.fs.exports")
-	runtimePromisesExportsSymbol = goja.NewSymbol("goja_ext.fs.promises.exports")
+	runtimeCoreKey            = runtimehost.NewKey("fs.core")
+	runtimeFullExportsKey     = runtimehost.NewKey("fs.exports")
+	runtimePromisesExportsKey = runtimehost.NewKey("fs.promises.exports")
+	runtimeGlobalExportsKey   = runtimehost.NewKey("fs.global.exports")
 )
+
+type runtimeCoreState struct {
+	core *Core
+	cfg  config
+	err  error
+}
+
+type runtimeExportsState struct {
+	exports   *goja.Object
+	scheduler runtimehost.Scheduler
+	streams   bool
+}
 
 func RequireWithOptions(opts ...Option) require.ModuleLoader {
 	return requireWithOptions(nil, false, opts...)
@@ -81,74 +96,90 @@ func registerLoaders(
 func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option) require.ModuleLoader {
 	options := append([]Option(nil), opts...)
 	return func(rt *goja.Runtime, module *goja.Object) {
+		scheduler, err := schedulerForRuntime(rt, loop)
+		if err != nil {
+			panic(fmt.Errorf("fs: %w", err))
+		}
 		core, err := coreForRuntime(rt, options...)
 		if err != nil {
 			panic(fmt.Errorf("fs: configure backend: %w", err))
 		}
-		if cached := cachedExports(rt, promises); cached != nil {
+		cfg, err := configFromOptions(options)
+		if err != nil {
+			panic(fmt.Errorf("fs: configure exports: %w", err))
+		}
+		if cached, err := cachedExports(rt, promises, scheduler, cfg); err != nil {
+			panic(err)
+		} else if cached != nil {
 			if err := module.Set("exports", cached); err != nil {
 				panic(err)
 			}
 			return
 		}
-		cfg := configFromOptions(options)
-		instance := &moduleInstance{rt: rt, core: core, loop: loop, streams: cfg.withStream}
+		instance := &moduleInstance{rt: rt, core: core, scheduler: scheduler, streams: cfg.withStream}
 		exports := module.Get("exports").ToObject(rt)
 		if promises {
 			bindPromiseExports(instance, exports)
+			bindNodePromiseExports(instance, exports)
 		} else {
 			bindFullExports(instance, exports)
 		}
-		if err := rt.GlobalObject().SetSymbol(exportsSymbol(promises), exports); err != nil {
-			panic(err)
-		}
+		runtimehost.Store(rt, exportsKey(promises), &runtimeExportsState{
+			exports:   exports,
+			scheduler: scheduler,
+			streams:   cfg.withStream,
+		})
 	}
 }
 
-func cachedExports(rt *goja.Runtime, promises bool) *goja.Object {
-	value := rt.GlobalObject().GetSymbol(exportsSymbol(promises))
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
-		return nil
+func cachedExports(rt *goja.Runtime, promises bool, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
+	value, ok := runtimehost.Load(rt, exportsKey(promises))
+	if !ok {
+		return nil, nil
 	}
-	if exports, ok := value.(*goja.Object); ok {
-		return exports
+	state, ok := value.(*runtimeExportsState)
+	if !ok {
+		return nil, errors.New("fs: invalid cached exports state")
 	}
-	return nil
+	if state.scheduler != scheduler {
+		return nil, errors.New("fs: exports already use a different scheduler")
+	}
+	if !promises && state.streams != cfg.withStream {
+		return nil, errors.New("fs: exports already use a different stream mode")
+	}
+	return state.exports, nil
 }
 
-func exportsSymbol(promises bool) *goja.Symbol {
+func exportsKey(promises bool) *runtimehost.Key {
 	if promises {
-		return runtimePromisesExportsSymbol
+		return runtimePromisesExportsKey
 	}
-	return runtimeFullExportsSymbol
-}
-
-func configFromOptions(opts []Option) config {
-	cfg := config{chunkSize: defaultStreamChunkSize}
-	for _, opt := range opts {
-		if opt != nil {
-			_ = opt(&cfg)
-		}
-	}
-	return cfg
+	return runtimeFullExportsKey
 }
 
 func coreForRuntime(rt *goja.Runtime, opts ...Option) (*Core, error) {
-	global := rt.GlobalObject()
-	if value := global.GetSymbol(runtimeCoreSymbol); value != nil &&
-		!goja.IsUndefined(value) && !goja.IsNull(value) {
-		if core, ok := value.Export().(*Core); ok {
-			return core, nil
-		}
-	}
-	core, err := NewCore(opts...)
+	cfg, err := configFromOptions(opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := global.SetSymbol(runtimeCoreSymbol, core); err != nil {
-		return nil, err
+	value := runtimehost.GetOrCreate(rt, runtimeCoreKey, func() any {
+		core, createErr := newCoreFromConfig(cfg)
+		return &runtimeCoreState{core: core, cfg: cfg, err: createErr}
+	})
+	state, ok := value.(*runtimeCoreState)
+	if !ok {
+		return nil, errors.New("fs: invalid runtime core state")
 	}
-	return core, nil
+	if state.err != nil {
+		return nil, state.err
+	}
+	if conflict := coreConfigConflict(state.cfg, cfg); conflict != "" {
+		return nil, fmt.Errorf("runtime already has a different %s", conflict)
+	}
+	if err := runtimehost.BindCwdProvider(rt, state.core); err != nil {
+		return nil, fmt.Errorf("bind cwd provider: %w", err)
+	}
+	return state.core, nil
 }
 
 func Enable(rt *goja.Runtime, opts ...Option) error {
@@ -163,15 +194,63 @@ func EnableWithLoop(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option)
 }
 
 func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
-	core, err := NewCore(opts...)
+	scheduler, err := schedulerForRuntime(rt, loop)
+	if err != nil {
+		return fmt.Errorf("fs: %w", err)
+	}
+	core, err := coreForRuntime(rt, opts...)
 	if err != nil {
 		return err
 	}
-	cfg := configFromOptions(opts)
-	instance := &moduleInstance{rt: rt, core: core, loop: loop, streams: cfg.withStream}
+	cfg, err := configFromOptions(opts)
+	if err != nil {
+		return err
+	}
+	if cached, err := cachedGlobalExports(rt, scheduler, cfg); err != nil {
+		return err
+	} else if cached != nil {
+		return rt.Set("fs", cached)
+	}
+	instance := &moduleInstance{rt: rt, core: core, scheduler: scheduler, streams: cfg.withStream}
 	exports := rt.NewObject()
-	bindFullExports(instance, exports)
+	bindDenoExports(instance, exports)
+	runtimehost.Store(rt, runtimeGlobalExportsKey, &runtimeExportsState{
+		exports:   exports,
+		scheduler: scheduler,
+		streams:   cfg.withStream,
+	})
 	return rt.Set("fs", exports)
+}
+
+func cachedGlobalExports(rt *goja.Runtime, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
+	value, ok := runtimehost.Load(rt, runtimeGlobalExportsKey)
+	if !ok {
+		return nil, nil
+	}
+	state, ok := value.(*runtimeExportsState)
+	if !ok {
+		return nil, errors.New("fs: invalid cached global exports state")
+	}
+	if state.scheduler != scheduler {
+		return nil, errors.New("fs: global exports already use a different scheduler")
+	}
+	if state.streams != cfg.withStream {
+		return nil, errors.New("fs: global exports already use a different stream mode")
+	}
+	return state.exports, nil
+}
+
+func schedulerForRuntime(rt *goja.Runtime, loop *eventloop.EventLoop) (runtimehost.Scheduler, error) {
+	if loop == nil {
+		return nil, nil
+	}
+	if err := runtimehost.ValidateScheduler(rt, loop); err != nil {
+		return nil, err
+	}
+	if err := runtimehost.BindScheduler(rt, loop); err != nil {
+		return nil, err
+	}
+	return loop, nil
 }
 
 func Require(rt *goja.Runtime, module *goja.Object) {
@@ -190,6 +269,11 @@ func init() {
 }
 
 func bindFullExports(instance *moduleInstance, exports *goja.Object) {
+	bindDenoExports(instance, exports)
+	bindNodeExports(instance, exports)
+}
+
+func bindDenoExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "chdir", instance.chdir)
 	setFunction(instance.rt, exports, "chmodSync", instance.chmodSync)
 	setFunction(instance.rt, exports, "chmod", instance.chmod)
@@ -229,7 +313,7 @@ func bindFullExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "writeTextFileSync", instance.writeTextFileSync)
 	setFunction(instance.rt, exports, "writeTextFile", instance.writeTextFile)
 	_ = exports.Set("FsFile", newFsFileConstructor(instance.rt))
-	bindNodeExports(instance, exports)
+	bindDenoExtraExports(instance, exports)
 }
 
 func bindPromiseExports(instance *moduleInstance, exports *goja.Object) {
@@ -251,6 +335,48 @@ func bindPromiseExports(instance *moduleInstance, exports *goja.Object) {
 	setFunction(instance.rt, exports, "utime", instance.utime)
 	setFunction(instance.rt, exports, "writeFile", instance.writeFile)
 	setFunction(instance.rt, exports, "writeTextFile", instance.writeTextFile)
+	bindDenoPromiseExtraExports(instance, exports)
+}
+
+func bindDenoExtraExports(instance *moduleInstance, exports *goja.Object) {
+	if instance.core.HasLstat() {
+		setFunction(instance.rt, exports, "lstatSync", instance.lstatSync)
+		setFunction(instance.rt, exports, "lstat", instance.lstat)
+	}
+	if instance.core.HasRealpath() {
+		setFunction(instance.rt, exports, "realPathSync", instance.realpathSync)
+		setFunction(instance.rt, exports, "realPath", instance.realpath)
+	}
+	if instance.core.HasReadlink() {
+		setFunction(instance.rt, exports, "readLinkSync", instance.readlinkSync)
+		setFunction(instance.rt, exports, "readLink", instance.readlink)
+	}
+	if instance.core.HasSymlink() {
+		setFunction(instance.rt, exports, "symlinkSync", instance.symlinkSync)
+		setFunction(instance.rt, exports, "symlink", instance.symlink)
+	}
+	if instance.core.HasLink() {
+		setFunction(instance.rt, exports, "linkSync", instance.linkSync)
+		setFunction(instance.rt, exports, "link", instance.link)
+	}
+}
+
+func bindDenoPromiseExtraExports(instance *moduleInstance, exports *goja.Object) {
+	if instance.core.HasLstat() {
+		setFunction(instance.rt, exports, "lstat", instance.lstat)
+	}
+	if instance.core.HasRealpath() {
+		setFunction(instance.rt, exports, "realPath", instance.realpath)
+	}
+	if instance.core.HasReadlink() {
+		setFunction(instance.rt, exports, "readLink", instance.readlink)
+	}
+	if instance.core.HasSymlink() {
+		setFunction(instance.rt, exports, "symlink", instance.symlink)
+	}
+	if instance.core.HasLink() {
+		setFunction(instance.rt, exports, "link", instance.link)
+	}
 }
 
 func setFunction(rt *goja.Runtime, object *goja.Object, name string, fn func(goja.FunctionCall) goja.Value) {

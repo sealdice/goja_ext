@@ -78,9 +78,32 @@ func TestEventEmitterListenersShape(t *testing.T) {
 		e.on("x", a).once("x", b);
 		const l = e.listeners("x");
 		const r = e.rawListeners("x");
-		JSON.stringify([l.length, r.length, l[0] === a, l[1] === b, e.listenerCount("x")]);
+		JSON.stringify([
+			l.length, r.length, l[0] === a, l[1] === b,
+			r[0] === a, r[1] !== b, r[1].listener === b,
+			e.listenerCount("x")
+		]);
 	`)
-	if out != `[2,2,true,true,2]` {
+	if out != `[2,2,true,true,true,true,true,2]` {
+		t.Fatalf("unexpected: %s", out)
+	}
+}
+
+func TestEventEmitterMaxListenersIsPerInstanceAndChainable(t *testing.T) {
+	rt := newRT(t)
+	out := runScript(t, rt, `
+		const { EventEmitter } = require("events");
+		const first = new EventEmitter();
+		const second = new EventEmitter();
+		const returned = first.setMaxListeners(3);
+		JSON.stringify([
+			returned === first,
+			first.getMaxListeners(),
+			second.getMaxListeners(),
+			EventEmitter.defaultMaxListeners
+		]);
+	`)
+	if out != `[true,3,10,10]` {
 		t.Fatalf("unexpected: %s", out)
 	}
 }

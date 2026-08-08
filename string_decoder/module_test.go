@@ -37,6 +37,51 @@ func TestStringDecoderSplitUTF8(t *testing.T) {
 	}
 }
 
+func TestStringDecoderSplitUTF16LE(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const d = new StringDecoder("utf16le");
+		const a = d.write(Buffer.from([0x41]));
+		const b = d.write(Buffer.from([0x00, 0x3d, 0xd8]));
+		const c = d.write(Buffer.from([0x00, 0xde]));
+		const e = d.end();
+		JSON.stringify([a, b, c, e]);
+	`)
+	want := `["","A","😀",""]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestStringDecoderBase64CarriesIncompleteGroups(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const d = new StringDecoder("base64");
+		const a = d.write(Buffer.from([1, 2]));
+		const b = d.write(Buffer.from([3]));
+		const c = d.write(Buffer.from([4, 5]));
+		const e = d.end();
+		JSON.stringify([a, b, c, e]);
+	`)
+	want := `["","AQID","","BAU="]`
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
+func TestStringDecoderSingleByteEncodings(t *testing.T) {
+	out := run(t, `
+		const { StringDecoder } = require("string_decoder");
+		const ascii = new StringDecoder("ascii").write(Buffer.from([0xff, 0x41]));
+		const latin1 = new StringDecoder("latin1").write(Buffer.from([0xff, 0x41]));
+		JSON.stringify([ascii, latin1]);
+	`)
+	want := "[\"\x7fA\",\"ÿA\"]"
+	if out != want {
+		t.Fatalf("got %s want %s", out, want)
+	}
+}
+
 func TestStringDecoderIncompleteAtEnd(t *testing.T) {
 	out := run(t, `
 		const { StringDecoder } = require("string_decoder");

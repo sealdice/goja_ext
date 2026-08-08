@@ -1,13 +1,12 @@
 /*
- * Web <-> classic stream bridge, backed by the canonical web-streams-polyfill
- * (injected as globalThis.__goja_ext_streams_canonical by the Go layer) and the
- * bundled streamx engine.
+ * Web <-> classic stream bridge, backed by the canonical Web Streams exports
+ * supplied lazily by the Go host and the bundled streamx engine.
  */
 
 const stream = require('streamx')
 
 function canonical() {
-  return globalThis.__goja_ext_streams_canonical
+  return require('goja:stream/web')
 }
 
 function readableToWeb(readable, opts) {

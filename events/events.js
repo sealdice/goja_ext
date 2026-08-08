@@ -46,25 +46,25 @@ class EventListener {
   append(ctx, name, fn, once) {
     this.count++
     ctx.emit('newListener', name, fn) // Emit BEFORE adding
-    this.list.push([fn, once])
+    this.list.push([once ? onceWrapper(fn) : fn, once])
   }
 
   prepend(ctx, name, fn, once) {
     this.count++
     ctx.emit('newListener', name, fn) // Emit BEFORE adding
-    this.list.unshift([fn, once])
+    this.list.unshift([once ? onceWrapper(fn) : fn, once])
   }
 
   remove(ctx, name, fn) {
     for (let i = 0, n = this.list.length; i < n; i++) {
       const l = this.list[i]
 
-      if (l[0] === fn) {
+      if (l[0] === fn || l[0].listener === fn) {
         this.list.splice(i, 1)
 
         if (this.count === 1) delete ctx._events[name]
 
-        ctx.emit('removeListener', name, fn) // Emit AFTER removing
+        ctx.emit('removeListener', name, l[0].listener || l[0]) // Emit AFTER removing
 
         this.count--
         return
@@ -79,7 +79,7 @@ class EventListener {
     if (this.count === list.length) delete ctx._events[name]
 
     for (let i = list.length - 1; i >= 0; i--) {
-      ctx.emit('removeListener', name, list[i][0]) // Emit AFTER removing
+      ctx.emit('removeListener', name, list[i][0].listener || list[i][0]) // Emit AFTER removing
     }
 
     this.count -= list.length
@@ -98,6 +98,14 @@ class EventListener {
 
     return list.length > 0
   }
+}
+
+function onceWrapper(fn) {
+  function wrapped(...args) {
+    return Reflect.apply(fn, this, args)
+  }
+  wrapped.listener = fn
+  return wrapped
 }
 
 function appendListener(ctx, name, fn, once) {
@@ -172,7 +180,7 @@ EventEmitter.prototype.emit = function (name, ...args) {
 EventEmitter.prototype.listeners = function (name) {
   if (this._events === undefined) return []
   const e = this._events[name]
-  return e === undefined ? [] : e.list.map((l) => l[0])
+  return e === undefined ? [] : e.list.map((l) => l[0].listener || l[0])
 }
 
 EventEmitter.prototype.rawListeners = function (name) {
@@ -193,11 +201,15 @@ EventEmitter.prototype.listenerCount = function (name) {
 }
 
 EventEmitter.prototype.getMaxListeners = function () {
-  return EventEmitter.defaultMaxListeners
+  return this._maxListeners === undefined ? EventEmitter.defaultMaxListeners : this._maxListeners
 }
 
 EventEmitter.prototype.setMaxListeners = function (n) {
-  this._maxListeners = n
+	if (typeof n !== 'number' || n < 0 || Number.isNaN(n)) {
+		throw new RangeError('max listeners must be a non-negative number')
+	}
+	this._maxListeners = n
+	return this
 }
 
 EventEmitter.prototype.removeAllListeners = function (name) {

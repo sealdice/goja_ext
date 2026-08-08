@@ -5,8 +5,54 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	_ "github.com/sealdice/goja_ext/abort"
+	_ "github.com/sealdice/goja_ext/buffer"
 	"github.com/sealdice/goja_ext/eventloop"
+	webstreams "github.com/sealdice/goja_ext/streams"
 )
+
+func TestNodeStreamInitializationIsPrivateAndWebStreamsAreLazy(t *testing.T) {
+	rt := goja.New()
+	if webstreams.Initialized(rt) {
+		t.Fatal("fresh runtime already has Web Streams")
+	}
+	exports := Exports(rt)
+	if webstreams.Initialized(rt) {
+		t.Fatal("Node streams eagerly initialized Web Streams")
+	}
+	if err := rt.Set("nodeStream", exports); err != nil {
+		t.Fatal(err)
+	}
+	value, err := rt.RunString(`
+		Reflect.ownKeys(globalThis)
+			.map(function (key) { return String(key); })
+			.filter(function (key) { return key.indexOf("goja_ext") !== -1; })
+			.join(",");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaked := value.String(); leaked != "" {
+		t.Fatalf("private globals leaked: %s", leaked)
+	}
+	for _, name := range []string{"self", "queueMicrotask", "__goja_ext_canonical_events", "__goja_ext_streams_canonical"} {
+		value := rt.Get(name)
+		if value != nil && !goja.IsUndefined(value) {
+			t.Errorf("global %s leaked as %s", name, value.String())
+		}
+	}
+
+	_, err = rt.RunString(`
+		const readable = new nodeStream.Readable({ read() { this.push(null); } });
+		nodeStream.Readable.toWeb(readable);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !webstreams.Initialized(rt) {
+		t.Fatal("Web adapter did not lazily initialize Web Streams")
+	}
+}
 
 func runNodeStreamsScript(t *testing.T, script string) string {
 	t.Helper()

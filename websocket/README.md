@@ -22,7 +22,9 @@ defer loop.Stop()
 
 ready := make(chan struct{})
 loop.RunOnLoop(func(rt *goja.Runtime) {
-    websocket.Enable(rt, loop)
+    if err := websocket.Enable(rt, loop); err != nil {
+        panic(err)
+    }
     close(ready)
 })
 <-ready
@@ -62,17 +64,45 @@ ws.onerror = (event) => {
 - `addEventListener(type, listener)`
 - `removeEventListener(type, listener)`
 
-## 连接管理和日志
+## 依赖与连接管理
 
-`GlobalConnManager` 会跟踪已创建的连接，可以通过
-`GlobalConnManager.CloseAll()` 统一关闭连接。
+`Enable` 是兼容入口：它把当前的全局日志器和 `GlobalConnManager` 注入
+模块，因此可以通过 `GlobalConnManager.CloseAll()` 统一关闭这条入口创建的连接。
 
 日志接口复用 `eventloop.Logger`，可以通过 `SetLogger` 注入自定义实现。
 未注入日志器时，普通日志级别丢弃，错误日志写入标准错误输出。
 
+需要隔离不同 runtime 时，应为每个模块提供自己的依赖：
+
+```go
+manager := &websocket.WebSocketManager{}
+module := websocket.New(
+    websocket.WithConnectionManager(manager),
+)
+defer module.CloseAll()
+
+instance, err := module.NewInstanceChecked(rt, loop)
+if err != nil {
+    return err
+}
+if err := rt.Set("WebSocket", instance.Exports()); err != nil {
+    return err
+}
+```
+
+`New()` 默认创建独立的管理器、日志器和拨号器。也可以通过
+`WithDialer` 注入完整的拨号策略，便于代理、测试或宿主网络策略接管。
+
+只需要安装构造函数时，可使用 `EnableWithOptions`；若要主动清理连接，调用方
+应注入并保留自己的 `WebSocketManager`。
+
+## TLS
+
+默认拨号器使用 Go 的系统根证书和主机名校验，不会跳过证书验证。
+`WithTLSConfig` 会克隆调用方提供的配置，可用于添加私有 CA、客户端证书等。
+若调用方显式设置 `InsecureSkipVerify`，不安全行为由该宿主配置自行承担。
+
 ## 注意事项
 
-- 当前实现的 TLS 配置启用了 `InsecureSkipVerify`，不会校验证书。
-  使用 `wss://` 连接不应默认视为安全连接。
 - 当前实现主要覆盖文本消息和基础 WebSocket 生命周期。
 - `Enable` 必须传入非 nil 的事件循环，否则创建连接时会抛出 TypeError。

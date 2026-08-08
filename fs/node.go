@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
-	nodestreams "github.com/sealdice/goja_ext/streams/node"
 )
 
 // nodeCall dispatches an operation to a Node-style callback (when the last
@@ -37,13 +36,13 @@ func (m *moduleInstance) runCallbackOp(cb goja.Callable, op func() (any, error),
 			}
 			_, _ = cb(goja.Undefined(), goja.Null(), convert(rt, value))
 		}
-		if m.loop != nil {
-			_ = m.loop.RunOnLoop(settle)
+		if m.scheduler != nil {
+			_ = m.scheduler.RunOnLoop(settle)
 		} else {
 			settle(m.rt)
 		}
 	}
-	if m.loop == nil {
+	if m.scheduler == nil {
 		run()
 	} else {
 		go run()
@@ -195,7 +194,7 @@ func (m *moduleInstance) rmSync(call goja.FunctionCall) goja.Value {
 	options := objectOrEmpty(m.rt, call.Argument(1))
 	recursive := propertyBool(options, "recursive", false)
 	force := propertyBool(options, "force", false)
-	if err := m.core.Remove(name, recursive); err != nil && !(force && os.IsNotExist(err)) {
+	if err := m.core.Remove(name, recursive); err != nil && (!force || !os.IsNotExist(err)) {
 		panicJSError(m.rt, err)
 	}
 	return goja.Undefined()
@@ -217,34 +216,90 @@ func (m *moduleInstance) rm(call goja.FunctionCall) goja.Value {
 
 func (m *moduleInstance) realpathSync(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
-	resolved := m.core.ResolvePath(name)
-	info, err := m.core.backend.Stat(resolved)
+	resolved, err := m.core.Realpath(name)
 	if err != nil {
-		panicJSError(m.rt, wrapPathError("realpath", resolved, "", err))
+		panicJSError(m.rt, err)
 	}
-	_ = info
 	return m.rt.ToValue(resolved)
 }
 
 func (m *moduleInstance) realpath(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
 	return m.nodeCall(call, func() (any, error) {
-		resolved := m.core.ResolvePath(name)
-		if _, err := m.core.backend.Stat(resolved); err != nil {
-			return nil, wrapPathError("realpath", resolved, "", err)
-		}
-		return resolved, nil
+		return m.core.Realpath(name)
 	}, func(rt *goja.Runtime, value any) goja.Value {
 		return rt.ToValue(value.(string))
 	})
 }
 
 func (m *moduleInstance) lstatSync(call goja.FunctionCall) goja.Value {
-	return m.statSync(call)
+	name := requiredPath(m.rt, call.Argument(0), "path")
+	info, err := m.core.Lstat(name)
+	if err != nil {
+		panicJSError(m.rt, err)
+	}
+	return fileInfoValue(m.rt, info)
 }
 
 func (m *moduleInstance) lstat(call goja.FunctionCall) goja.Value {
-	return m.stat(call)
+	name := requiredPath(m.rt, call.Argument(0), "path")
+	return m.nodeCall(call, func() (any, error) {
+		return m.core.Lstat(name)
+	}, func(rt *goja.Runtime, value any) goja.Value {
+		return fileInfoValue(rt, value.(os.FileInfo))
+	})
+}
+
+func (m *moduleInstance) readlinkSync(call goja.FunctionCall) goja.Value {
+	name := requiredPath(m.rt, call.Argument(0), "path")
+	target, err := m.core.Readlink(name)
+	if err != nil {
+		panicJSError(m.rt, err)
+	}
+	return m.rt.ToValue(target)
+}
+
+func (m *moduleInstance) readlink(call goja.FunctionCall) goja.Value {
+	name := requiredPath(m.rt, call.Argument(0), "path")
+	return m.nodeCall(call, func() (any, error) {
+		return m.core.Readlink(name)
+	}, func(rt *goja.Runtime, value any) goja.Value {
+		return rt.ToValue(value.(string))
+	})
+}
+
+func (m *moduleInstance) symlinkSync(call goja.FunctionCall) goja.Value {
+	target := requiredPath(m.rt, call.Argument(0), "target")
+	name := requiredPath(m.rt, call.Argument(1), "path")
+	if err := m.core.Symlink(target, name); err != nil {
+		panicJSError(m.rt, err)
+	}
+	return goja.Undefined()
+}
+
+func (m *moduleInstance) symlink(call goja.FunctionCall) goja.Value {
+	target := requiredPath(m.rt, call.Argument(0), "target")
+	name := requiredPath(m.rt, call.Argument(1), "path")
+	return m.nodeCall(call, func() (any, error) {
+		return nil, m.core.Symlink(target, name)
+	}, nil)
+}
+
+func (m *moduleInstance) linkSync(call goja.FunctionCall) goja.Value {
+	existing := requiredPath(m.rt, call.Argument(0), "existingPath")
+	name := requiredPath(m.rt, call.Argument(1), "newPath")
+	if err := m.core.Link(existing, name); err != nil {
+		panicJSError(m.rt, err)
+	}
+	return goja.Undefined()
+}
+
+func (m *moduleInstance) link(call goja.FunctionCall) goja.Value {
+	existing := requiredPath(m.rt, call.Argument(0), "existingPath")
+	name := requiredPath(m.rt, call.Argument(1), "newPath")
+	return m.nodeCall(call, func() (any, error) {
+		return nil, m.core.Link(existing, name)
+	}, nil)
 }
 
 // --- createReadStream / createWriteStream ----------------------------------
@@ -338,7 +393,7 @@ func (m *moduleInstance) createReadStream(call goja.FunctionCall) goja.Value {
 	}
 	result, err := fn(
 		goja.Undefined(),
-		nodestreams.Exports(rt).Get("Readable"),
+		nodeStreamConstructor(rt, "Readable"),
 		readFn,
 		closeFn,
 		rt.ToValue(map[string]interface{}{
@@ -406,7 +461,7 @@ func (m *moduleInstance) createWriteStream(call goja.FunctionCall) goja.Value {
 	}
 	result, err := fn(
 		goja.Undefined(),
-		nodestreams.Exports(rt).Get("Writable"),
+		nodeStreamConstructor(rt, "Writable"),
 		writeFn,
 		closeFn,
 		rt.ToValue(map[string]interface{}{}),
@@ -420,6 +475,22 @@ func (m *moduleInstance) createWriteStream(call goja.FunctionCall) goja.Value {
 
 func isEOF(err error) bool {
 	return err == io.EOF || errors.Is(err, io.EOF)
+}
+
+func nodeStreamConstructor(rt *goja.Runtime, name string) goja.Value {
+	requireFn, ok := goja.AssertFunction(rt.Get("require"))
+	if !ok {
+		panic(rt.NewTypeError("fs: Node stream methods require the stream module"))
+	}
+	module, err := requireFn(goja.Undefined(), rt.ToValue("stream"))
+	if err != nil {
+		panic(rt.NewTypeError("fs: Node stream methods require an enabled stream module: " + err.Error()))
+	}
+	constructor := module.ToObject(rt).Get(name)
+	if constructor == nil || goja.IsUndefined(constructor) || goja.IsNull(constructor) {
+		panic(rt.NewTypeError("fs: stream module is missing " + name))
+	}
+	return constructor
 }
 
 func propertyInt(object *goja.Object, name string, defaultValue int) int {
@@ -498,9 +569,35 @@ func bindNodeExports(instance *moduleInstance, exports *goja.Object) {
 	setNodeFn("realpath", instance.realpath)
 	setNodeFn("lstatSync", instance.lstatSync)
 	setNodeFn("lstat", instance.lstat)
-	setNodeFn("createReadStream", instance.createReadStream)
-	setNodeFn("createWriteStream", instance.createWriteStream)
-	setNodeFn("readStream", instance.createReadStream)
-	setNodeFn("writeStream", instance.createWriteStream)
+	setNodeFn("readlinkSync", instance.readlinkSync)
+	setNodeFn("readlink", instance.readlink)
+	setNodeFn("symlinkSync", instance.symlinkSync)
+	setNodeFn("symlink", instance.symlink)
+	setNodeFn("linkSync", instance.linkSync)
+	setNodeFn("link", instance.link)
+	if instance.streams {
+		setNodeFn("createReadStream", instance.createReadStream)
+		setNodeFn("createWriteStream", instance.createWriteStream)
+		setNodeFn("readStream", instance.createReadStream)
+		setNodeFn("writeStream", instance.createWriteStream)
+	}
 	_ = exports.Set("constants", nodeConstants(rt))
+}
+
+func bindNodePromiseExports(instance *moduleInstance, exports *goja.Object) {
+	setNodeFn := func(name string, fn func(goja.FunctionCall) goja.Value) {
+		if err := exports.Set(name, fn); err != nil {
+			panic(err)
+		}
+	}
+	setNodeFn("appendFile", instance.appendFile)
+	setNodeFn("access", instance.access)
+	setNodeFn("unlink", instance.unlink)
+	setNodeFn("rmdir", instance.rmdir)
+	setNodeFn("rm", instance.rm)
+	setNodeFn("realpath", instance.realpath)
+	setNodeFn("lstat", instance.lstat)
+	setNodeFn("readlink", instance.readlink)
+	setNodeFn("symlink", instance.symlink)
+	setNodeFn("link", instance.link)
 }

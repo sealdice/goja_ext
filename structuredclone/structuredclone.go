@@ -1,6 +1,7 @@
 package structuredclone
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/dop251/goja"
@@ -8,6 +9,20 @@ import (
 )
 
 const ModuleName = "structuredclone"
+
+var typedArrayClasses = map[string]struct{}{
+	"BigInt64Array":     {},
+	"BigUint64Array":    {},
+	"Float32Array":      {},
+	"Float64Array":      {},
+	"Int8Array":         {},
+	"Int16Array":        {},
+	"Int32Array":        {},
+	"Uint8Array":        {},
+	"Uint8ClampedArray": {},
+	"Uint16Array":       {},
+	"Uint32Array":       {},
+}
 
 // Enable registers structuredClone as a global function.
 func Enable(rt *goja.Runtime) {
@@ -29,166 +44,234 @@ func structuredCloneFn(rt *goja.Runtime) func(call goja.FunctionCall) goja.Value
 		if len(call.Arguments) < 1 {
 			panic(rt.NewTypeError("structuredClone: value argument is required"))
 		}
-		val := call.Argument(0)
-		seen := make(map[*goja.Object]goja.Value)
-		return cloneValue(rt, val, seen)
+		return cloneValue(rt, call.Argument(0), make(map[*goja.Object]goja.Value))
 	}
 }
 
-func cloneValue(rt *goja.Runtime, v goja.Value, seen map[*goja.Object]goja.Value) goja.Value {
-	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
-		return v
+func cloneValue(rt *goja.Runtime, value goja.Value, seen map[*goja.Object]goja.Value) goja.Value {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return value
+	}
+	if _, isSymbol := value.(*goja.Symbol); isSymbol {
+		throwDataCloneError(rt, "%s could not be cloned", value.String())
 	}
 
-	switch v.ExportType().String() {
-	case "int", "int64", "uint", "uint64", "float32", "float64", "bool", "string":
-		return v
+	obj, isObject := value.(*goja.Object)
+	if !isObject {
+		// Number, String, Boolean, and BigInt primitives are immutable values.
+		return value
 	}
-
-	obj, ok := v.(*goja.Object)
-	if !ok {
-		return v
+	if _, callable := goja.AssertFunction(value); callable {
+		throwDataCloneError(rt, "%s could not be cloned", value.String())
 	}
-
 	if cached, ok := seen[obj]; ok {
 		return cached
 	}
 
-	// goja reports ClassName()=="Object" for Map and Set instances, so we
-	// detect them by constructor identity before dispatching. The routing is
-	// required for Map/Set cloning to work; without it they fall through to the
-	// plain-Object case. (Pathological inputs like Object.create(Map.prototype)
-	// may be misrouted to an empty Map; acceptable for a polyfill.)
-	className := obj.ClassName()
-	if className == "Object" {
-		if ctor := obj.Get("constructor"); ctor != nil {
-			switch {
-			case ctor.SameAs(rt.Get("Map")):
-				className = "Map"
-			case ctor.SameAs(rt.Get("Set")):
-				className = "Set"
-			}
-		}
-	}
-
-	switch className {
+	kind := objectKind(rt, obj)
+	switch kind {
 	case "Array":
-		n := int(obj.Get("length").ToInteger())
-		arr := rt.NewArray()
-		seen[obj] = arr
-		for i := 0; i < n; i++ {
-			_ = arr.Set(strconv.Itoa(i), cloneValue(rt, obj.Get(strconv.Itoa(i)), seen))
-		}
-		return arr
+		return cloneArray(rt, obj, seen)
 	case "Object", "goja.Object":
-		newObj := rt.NewObject()
-		seen[obj] = newObj
-		for _, k := range obj.Keys() {
-			_ = newObj.Set(k, cloneValue(rt, obj.Get(k), seen))
-		}
-		return newObj
+		return clonePlainObject(rt, obj, seen)
 	case "Map":
-		mapCtor, ok := goja.AssertConstructor(rt.Get("Map"))
-		if !ok {
-			return jsonClone(rt, v)
-		}
-		newMap, err := mapCtor(nil)
-		if err != nil {
-			return jsonClone(rt, v)
-		}
-		seen[obj] = newMap
-		setFn, _ := goja.AssertFunction(newMap.Get("set"))
-		if entriesFn, ok := goja.AssertFunction(obj.Get("entries")); ok {
-			if iter, err := entriesFn(obj); err == nil {
-				if iterObj, ok := iter.(*goja.Object); ok {
-					if next, ok := goja.AssertFunction(iterObj.Get("next")); ok {
-						for {
-							res, err := next(iterObj)
-							if err != nil {
-								break
-							}
-							resObj := res.ToObject(rt)
-							if resObj.Get("done").ToBoolean() {
-								break
-							}
-							entryObj := resObj.Get("value").ToObject(rt)
-							k := cloneValue(rt, entryObj.Get("0"), seen)
-							clonedV := cloneValue(rt, entryObj.Get("1"), seen)
-							if setFn != nil {
-								_, _ = setFn(newMap, k, clonedV)
-							}
-						}
-					}
-				}
-			}
-		}
-		return newMap
+		return cloneMap(rt, obj, seen)
 	case "Set":
-		setCtor, ok := goja.AssertConstructor(rt.Get("Set"))
-		if !ok {
-			return jsonClone(rt, v)
-		}
-		newSet, err := setCtor(nil)
-		if err != nil {
-			return jsonClone(rt, v)
-		}
-		seen[obj] = newSet
-		addFn, _ := goja.AssertFunction(newSet.Get("add"))
-		if valuesFn, ok := goja.AssertFunction(obj.Get("values")); ok {
-			if iter, err := valuesFn(obj); err == nil {
-				if iterObj, ok := iter.(*goja.Object); ok {
-					if next, ok := goja.AssertFunction(iterObj.Get("next")); ok {
-						for {
-							res, err := next(iterObj)
-							if err != nil {
-								break
-							}
-							resObj := res.ToObject(rt)
-							if resObj.Get("done").ToBoolean() {
-								break
-							}
-							if addFn != nil {
-								_, _ = addFn(newSet, cloneValue(rt, resObj.Get("value"), seen))
-							}
-						}
-					}
-				}
-			}
-		}
-		return newSet
+		return cloneSet(rt, obj, seen)
 	case "Date":
-		dateCtor, ok := goja.AssertConstructor(rt.Get("Date"))
-		if !ok {
-			return v
+		return cloneDate(rt, obj, seen)
+	case "RegExp":
+		return cloneRegExp(rt, obj, seen)
+	case "ArrayBuffer":
+		return cloneArrayBuffer(rt, obj, seen)
+	case "DataView":
+		return cloneView(rt, obj, kind, seen)
+	case "WeakMap", "WeakSet", "Promise":
+		throwDataCloneError(rt, "%s could not be cloned", kind)
+	default:
+		if _, typedArray := typedArrayClasses[kind]; typedArray {
+			return cloneView(rt, obj, kind, seen)
 		}
-		if getTime, ok := goja.AssertFunction(obj.Get("getTime")); ok {
-			if t, err := getTime(obj); err == nil && t != nil {
-				if newObj, err := dateCtor(nil, t); err == nil {
-					seen[obj] = newObj
-					return newObj
-				}
-			}
-		}
-		return v
+		throwDataCloneError(rt, "%s objects are not supported", kind)
 	}
-
-	return jsonClone(rt, v)
+	return nil
 }
 
-func jsonClone(rt *goja.Runtime, v goja.Value) goja.Value {
-	jsonObj := rt.Get("JSON").ToObject(rt)
-	stringify, _ := goja.AssertFunction(jsonObj.Get("stringify"))
-	parse, _ := goja.AssertFunction(jsonObj.Get("parse"))
-	if stringify == nil || parse == nil {
-		return v
+func objectKind(rt *goja.Runtime, obj *goja.Object) string {
+	className := obj.ClassName()
+	ctor := obj.Get("constructor")
+	if ctor == nil {
+		return className
 	}
-	raw, err := stringify(goja.Undefined(), v)
-	if err != nil {
-		return v
+	for _, name := range []string{
+		"Map", "Set", "WeakMap", "WeakSet", "Promise", "Date", "RegExp",
+		"ArrayBuffer", "DataView", "BigInt64Array", "BigUint64Array",
+		"Float32Array", "Float64Array", "Int8Array", "Int16Array", "Int32Array",
+		"Uint8Array", "Uint8ClampedArray", "Uint16Array", "Uint32Array",
+	} {
+		candidate := rt.Get(name)
+		if candidate != nil && !goja.IsUndefined(candidate) && ctor.SameAs(candidate) {
+			return name
+		}
 	}
-	cloned, err := parse(goja.Undefined(), raw)
-	if err != nil {
-		return v
+	return className
+}
+
+func cloneArray(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	length := int(source.Get("length").ToInteger())
+	cloned := rt.NewArray()
+	seen[source] = cloned
+	for index := 0; index < length; index++ {
+		key := strconv.Itoa(index)
+		mustSet(rt, cloned, key, cloneValue(rt, source.Get(key), seen))
 	}
 	return cloned
+}
+
+func clonePlainObject(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	cloned := rt.NewObject()
+	seen[source] = cloned
+	for _, key := range source.Keys() {
+		mustSet(rt, cloned, key, cloneValue(rt, source.Get(key), seen))
+	}
+	return cloned
+}
+
+func cloneMap(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	cloned := mustConstruct(rt, "Map")
+	seen[source] = cloned
+	set := mustFunction(rt, cloned.Get("set"), "Map.set")
+	entries := mustFunction(rt, source.Get("entries"), "Map.entries")
+	iterator, err := entries(source)
+	if err != nil {
+		panic(err)
+	}
+	next := mustFunction(rt, iterator.ToObject(rt).Get("next"), "Map iterator.next")
+	for {
+		result, err := next(iterator)
+		if err != nil {
+			panic(err)
+		}
+		resultObj := result.ToObject(rt)
+		if resultObj.Get("done").ToBoolean() {
+			break
+		}
+		entry := resultObj.Get("value").ToObject(rt)
+		_, err = set(
+			cloned,
+			cloneValue(rt, entry.Get("0"), seen),
+			cloneValue(rt, entry.Get("1"), seen),
+		)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return cloned
+}
+
+func cloneSet(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	cloned := mustConstruct(rt, "Set")
+	seen[source] = cloned
+	add := mustFunction(rt, cloned.Get("add"), "Set.add")
+	values := mustFunction(rt, source.Get("values"), "Set.values")
+	iterator, err := values(source)
+	if err != nil {
+		panic(err)
+	}
+	next := mustFunction(rt, iterator.ToObject(rt).Get("next"), "Set iterator.next")
+	for {
+		result, err := next(iterator)
+		if err != nil {
+			panic(err)
+		}
+		resultObj := result.ToObject(rt)
+		if resultObj.Get("done").ToBoolean() {
+			break
+		}
+		_, err = add(cloned, cloneValue(rt, resultObj.Get("value"), seen))
+		if err != nil {
+			panic(err)
+		}
+	}
+	return cloned
+}
+
+func cloneDate(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	getTime := mustFunction(rt, source.Get("getTime"), "Date.getTime")
+	timestamp, err := getTime(source)
+	if err != nil {
+		panic(err)
+	}
+	cloned := mustConstruct(rt, "Date", timestamp)
+	seen[source] = cloned
+	return cloned
+}
+
+func cloneRegExp(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	cloned := mustConstruct(rt, "RegExp", source.Get("source"), source.Get("flags"))
+	seen[source] = cloned
+	return cloned
+}
+
+func cloneArrayBuffer(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
+	arrayBuffer, ok := source.Export().(goja.ArrayBuffer)
+	if !ok || arrayBuffer.Detached() {
+		throwDataCloneError(rt, "ArrayBuffer could not be cloned")
+	}
+	data := append([]byte(nil), arrayBuffer.Bytes()...)
+	cloned := rt.ToValue(rt.NewArrayBuffer(data)).ToObject(rt)
+	seen[source] = cloned
+	return cloned
+}
+
+func cloneView(
+	rt *goja.Runtime,
+	source *goja.Object,
+	kind string,
+	seen map[*goja.Object]goja.Value,
+) goja.Value {
+	buffer := source.Get("buffer")
+	clonedBuffer := cloneValue(rt, buffer, seen)
+	byteOffset := source.Get("byteOffset")
+	var cloned *goja.Object
+	if kind == "DataView" {
+		cloned = mustConstruct(rt, kind, clonedBuffer, byteOffset, source.Get("byteLength"))
+	} else {
+		cloned = mustConstruct(rt, kind, clonedBuffer, byteOffset, source.Get("length"))
+	}
+	seen[source] = cloned
+	return cloned
+}
+
+func mustConstruct(rt *goja.Runtime, name string, arguments ...goja.Value) *goja.Object {
+	constructor, ok := goja.AssertConstructor(rt.Get(name))
+	if !ok {
+		throwDataCloneError(rt, "%s constructor is unavailable", name)
+	}
+	object, err := constructor(nil, arguments...)
+	if err != nil {
+		panic(err)
+	}
+	return object
+}
+
+func mustFunction(rt *goja.Runtime, value goja.Value, name string) goja.Callable {
+	function, ok := goja.AssertFunction(value)
+	if !ok {
+		throwDataCloneError(rt, "%s is unavailable", name)
+	}
+	return function
+}
+
+func mustSet(rt *goja.Runtime, object *goja.Object, key string, value goja.Value) {
+	if err := object.Set(key, value); err != nil {
+		throwDataCloneError(rt, "property %q could not be cloned: %v", key, err)
+	}
+}
+
+func throwDataCloneError(rt *goja.Runtime, format string, arguments ...interface{}) {
+	err := rt.NewTypeError(fmt.Sprintf(format, arguments...))
+	_ = err.Set("name", "DataCloneError")
+	_ = err.Set("code", 25)
+	panic(err)
 }

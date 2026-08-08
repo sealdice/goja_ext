@@ -136,10 +136,10 @@ func parseSearchQuery(query string) (ret searchParams) {
 			continue
 		}
 		pair := strings.SplitN(v, "=", 2)
-		l := len(pair)
-		if l == 1 {
+		switch len(pair) {
+		case 1:
 			ret = append(ret, searchParam{name: unescapeSearchParam(pair[0]), value: ""})
-		} else if l == 2 {
+		case 2:
 			ret = append(ret, searchParam{name: unescapeSearchParam(pair[0]), value: unescapeSearchParam(pair[1])})
 		}
 	}

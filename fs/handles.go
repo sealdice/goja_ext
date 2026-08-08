@@ -165,38 +165,34 @@ func bindFsFile(instance *moduleInstance, handle *FileHandle) *goja.Object {
 		return rt.ToValue(false)
 	})
 
-	var readable goja.Value
-	var writable goja.Value
-	_ = object.DefineAccessorProperty(
-		"readable",
-		rt.ToValue(func() goja.Value {
-			if !instance.streams {
-				panicJSError(rt, errors.New("WHATWG Streams integration is disabled"))
-			}
-			if readable == nil {
-				readable = newFileReadableStream(instance, handle)
-			}
-			return readable
-		}),
-		goja.Undefined(),
-		goja.FLAG_TRUE,
-		goja.FLAG_TRUE,
-	)
-	_ = object.DefineAccessorProperty(
-		"writable",
-		rt.ToValue(func() goja.Value {
-			if !instance.streams {
-				panicJSError(rt, errors.New("WHATWG Streams integration is disabled"))
-			}
-			if writable == nil {
-				writable = newFileWritableStream(instance, handle)
-			}
-			return writable
-		}),
-		goja.Undefined(),
-		goja.FLAG_TRUE,
-		goja.FLAG_TRUE,
-	)
+	if instance.streams {
+		var readable goja.Value
+		var writable goja.Value
+		_ = object.DefineAccessorProperty(
+			"readable",
+			rt.ToValue(func() goja.Value {
+				if readable == nil {
+					readable = newFileReadableStream(instance, handle)
+				}
+				return readable
+			}),
+			goja.Undefined(),
+			goja.FLAG_TRUE,
+			goja.FLAG_TRUE,
+		)
+		_ = object.DefineAccessorProperty(
+			"writable",
+			rt.ToValue(func() goja.Value {
+				if writable == nil {
+					writable = newFileWritableStream(instance, handle)
+				}
+				return writable
+			}),
+			goja.Undefined(),
+			goja.FLAG_TRUE,
+			goja.FLAG_TRUE,
+		)
+	}
 	return object
 }
 

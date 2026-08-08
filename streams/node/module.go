@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/abort"
 	"github.com/sealdice/goja_ext/events"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 	"github.com/sealdice/goja_ext/streams"
 )
 
@@ -15,7 +15,7 @@ const (
 	NodeModule = "node:stream"
 )
 
-var moduleSymbol = goja.NewSymbol("goja_ext.node_stream.module")
+var moduleKey = runtimehost.NewKey("streams.node.exports")
 
 // Require exports the canonical node classic stream object for this runtime.
 func Require(rt *goja.Runtime, module *goja.Object) {
@@ -28,45 +28,32 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 // object is shared by require("stream"), require("node:stream") and, through
 // the injected canonical events, the events module.
 func Exports(rt *goja.Runtime) *goja.Object {
-	global := rt.GlobalObject()
-	if value := global.GetSymbol(moduleSymbol); value != nil &&
-		!goja.IsUndefined(value) && !goja.IsNull(value) {
-		if exports, ok := value.(*goja.Object); ok {
-			return exports
+	value := runtimehost.GetOrCreate(rt, moduleKey, func() any {
+		return initializePolyfill(rt)
+	})
+	return value.(*goja.Object)
+}
+
+func initializePolyfill(rt *goja.Runtime) *goja.Object {
+	initializer, err := rt.RunProgram(polyfillProgram)
+	if err != nil {
+		panic(fmt.Errorf("node streams: load polyfill initializer: %w", err))
+	}
+	initialize, ok := goja.AssertFunction(initializer)
+	if !ok {
+		panic("node streams: polyfill did not return an initializer")
+	}
+	requireDependency := rt.ToValue(func(call goja.FunctionCall) goja.Value {
+		switch call.Argument(0).String() {
+		case "events":
+			return events.Exports(rt)
+		case "goja:stream/web":
+			return streams.Exports(rt)
+		default:
+			panic(rt.NewTypeError("node streams: unresolved require: " + call.Argument(0).String()))
 		}
-	}
-
-	previousSelf := global.Get("self")
-	self := rt.NewObject()
-	abortModule := rt.NewObject()
-	if err := abortModule.Set("exports", rt.NewObject()); err != nil {
-		panic(err)
-	}
-	abort.Require(rt, abortModule)
-	abortExports := abortModule.Get("exports").ToObject(rt)
-	if err := self.Set("AbortController", abortExports.Get("AbortController")); err != nil {
-		panic(err)
-	}
-	if err := self.Set("AbortSignal", abortExports.Get("AbortSignal")); err != nil {
-		panic(err)
-	}
-	if err := global.Set("self", self); err != nil {
-		panic(err)
-	}
-	if err := global.Set("__goja_ext_canonical_events", events.Exports(rt)); err != nil {
-		panic(err)
-	}
-	if err := global.Set("__goja_ext_streams_canonical", canonicalStreams(rt)); err != nil {
-		panic(err)
-	}
-	installQueueMicrotask(rt)
-
-	value, err := rt.RunProgram(polyfillProgram)
-	if previousSelf == nil || goja.IsUndefined(previousSelf) {
-		_ = global.Delete("self")
-	} else {
-		_ = global.Set("self", previousSelf)
-	}
+	})
+	value, err := initialize(goja.Undefined(), requireDependency, privateQueueMicrotask(rt))
 	if err != nil {
 		panic(fmt.Errorf("node streams: initialize polyfill: %w", err))
 	}
@@ -74,35 +61,14 @@ func Exports(rt *goja.Runtime) *goja.Object {
 	if !ok {
 		panic("node streams: polyfill did not return an exports object")
 	}
-	if err := global.SetSymbol(moduleSymbol, exports); err != nil {
-		panic(err)
-	}
 	return exports
 }
 
-func canonicalStreams(rt *goja.Runtime) *goja.Object {
-	streamsExports := streams.Exports(rt)
-	canonical := rt.NewObject()
-	for _, name := range []string{
-		"ReadableStream", "WritableStream", "TransformStream",
-		"ReadableStreamDefaultReader", "WritableStreamDefaultWriter",
-		"ReadableStreamBYOBReader", "ReadableStreamBYOBRequest",
-		"ReadableByteStreamController", "ReadableStreamDefaultController",
-		"WritableStreamDefaultController", "TransformStreamDefaultController",
-		"ByteLengthQueuingStrategy", "CountQueuingStrategy",
-	} {
-		_ = canonical.Set(name, streamsExports.Get(name))
+func privateQueueMicrotask(rt *goja.Runtime) goja.Value {
+	if value := rt.Get("queueMicrotask"); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
+		return value
 	}
-	return canonical
-}
-
-// installQueueMicrotask ensures a queueMicrotask global exists so the bundled
-// streamx uses goja's native microtask queue instead of process.nextTick.
-func installQueueMicrotask(rt *goja.Runtime) {
-	if value := rt.Get("queueMicrotask"); value != nil && !goja.IsUndefined(value) {
-		return
-	}
-	_ = rt.Set("queueMicrotask", func(call goja.FunctionCall) goja.Value {
+	return rt.ToValue(func(call goja.FunctionCall) goja.Value {
 		fn := call.Argument(0)
 		if _, ok := goja.AssertFunction(fn); !ok {
 			panic(rt.NewTypeError("queueMicrotask expects a function"))

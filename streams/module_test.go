@@ -298,6 +298,24 @@ func TestTextEncoderAndDecoderStreams(t *testing.T) {
 	}
 }
 
+func TestTextEncoderStreamEmitsNativeUint8Array(t *testing.T) {
+	result := runStreamsScript(t, `
+		const stream = new TextEncoderStream();
+		const reader = stream.readable.getReader();
+		const writer = stream.writable.getWriter();
+		reader.read().then(function (item) {
+			globalThis.__result = String(
+				item.value.constructor === Uint8Array &&
+				Object.getPrototypeOf(item.value) === Uint8Array.prototype
+			);
+		});
+		writer.write("native").then(function () { return writer.close(); });
+	`)
+	if result != "true" {
+		t.Fatalf("encoder emitted non-native byte chunk: %s", result)
+	}
+}
+
 func TestTextEncoderStreamBuffersSplitSurrogatePair(t *testing.T) {
 	result := runStreamsScript(t, `
 		function collect(reader, values) {

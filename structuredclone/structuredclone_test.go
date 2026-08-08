@@ -196,14 +196,83 @@ func TestStructuredClone_InvalidDate(t *testing.T) {
 	}
 }
 
-func TestStructuredClone_JSONCloneFallback(t *testing.T) {
+func TestStructuredClone_RegExp(t *testing.T) {
 	rt := goja.New()
 	Enable(rt)
-	if _, err := rt.RunString(`structuredClone(/abc/)`); err != nil {
-		t.Fatalf("regexp clone should not throw: %v", err)
+	v, err := rt.RunString(`
+		const original = /ab+/gi;
+		original.lastIndex = 4;
+		const copy = structuredClone(original);
+		JSON.stringify([copy instanceof RegExp, copy.source, copy.flags, copy.lastIndex, copy === original]);
+	`)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := rt.RunString(`structuredClone(() => {})`); err != nil {
-		t.Fatalf("function clone should not throw: %v", err)
+	if got, want := v.String(), `[true,"ab+","gi",0,false]`; got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+func TestStructuredClone_ArrayBufferAndViews(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	v, err := rt.RunString(`
+		const buffer = new ArrayBuffer(6);
+		const bytes = new Uint8Array(buffer);
+		bytes.set([1, 2, 3, 4, 5, 6]);
+		const original = {
+			buffer,
+			view: new Uint16Array(buffer, 2, 2),
+			dataView: new DataView(buffer, 1, 4)
+		};
+		const copy = structuredClone(original);
+		bytes[2] = 99;
+		JSON.stringify([
+			copy.buffer instanceof ArrayBuffer,
+			copy.view instanceof Uint16Array,
+			copy.dataView instanceof DataView,
+			copy.view.buffer === copy.buffer,
+			copy.dataView.buffer === copy.buffer,
+			copy.view.byteOffset,
+			copy.view.length,
+			Array.from(new Uint8Array(copy.buffer))
+		]);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[true,true,true,true,true,2,2,[1,2,3,4,5,6]]`
+	if v.String() != want {
+		t.Fatalf("got %s want %s", v.String(), want)
+	}
+}
+
+func TestStructuredClone_UnsupportedValuesThrowDataCloneError(t *testing.T) {
+	rt := goja.New()
+	Enable(rt)
+	v, err := rt.RunString(`
+		const values = [
+			() => {},
+			Symbol("x"),
+			new WeakMap(),
+			Promise.resolve(1),
+			{ nested: () => {} }
+		];
+		values.map((value) => {
+			try {
+				structuredClone(value);
+				return "missing";
+			} catch (error) {
+				return error.name + ":" + error.code;
+			}
+		}).join(",");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "DataCloneError:25,DataCloneError:25,DataCloneError:25,DataCloneError:25,DataCloneError:25"
+	if v.String() != want {
+		t.Fatalf("got %s want %s", v.String(), want)
 	}
 }
 

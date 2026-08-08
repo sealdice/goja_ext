@@ -1,7 +1,9 @@
 package fs
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,150 @@ import (
 	"github.com/sealdice/goja_ext/require"
 	"github.com/spf13/afero"
 )
+
+func TestEnableAndRequireShareCanonicalCore(t *testing.T) {
+	rt := goja.New()
+	registry := require.NewRegistry()
+	backend := afero.NewMemMapFs()
+	registry.RegisterNativeModule("fs", RequireWithOptions(
+		WithFS(backend),
+		WithCwd("/workspace"),
+	))
+	registry.Enable(rt)
+	if err := Enable(rt, WithFS(backend), WithCwd("/workspace")); err != nil {
+		t.Fatal(err)
+	}
+
+	value, err := rt.RunString(`
+		fs.mkdirSync("shared", { recursive: true });
+		fs.writeTextFileSync("shared/value.txt", "canonical");
+		fs.chdir("shared");
+		const required = require("fs");
+		required.cwd() + "|" + required.readTextFileSync("value.txt");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "/workspace/shared|canonical" {
+		t.Fatalf("shared value = %q", got)
+	}
+}
+
+func TestEnableInstallsOnlyDenoFacade(t *testing.T) {
+	rt := goja.New()
+	if err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/workspace")); err != nil {
+		t.Fatal(err)
+	}
+	value, err := rt.RunString(`
+		[
+			typeof fs.readTextFileSync,
+			typeof fs.appendFileSync,
+			typeof fs.createReadStream,
+			typeof fs.constants
+		].join("|");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "function|undefined|undefined|undefined" {
+		t.Fatalf("Deno facade surface = %q", got)
+	}
+}
+
+func TestWithStreamsFalseOmitsEveryStreamSurface(t *testing.T) {
+	rt := goja.New()
+	registry := require.NewRegistry()
+	registry.RegisterNativeModule("fs", RequireWithOptions(
+		WithFS(afero.NewMemMapFs()),
+		WithCwd("/workspace"),
+		WithStreams(false),
+	))
+	registry.Enable(rt)
+	value, err := rt.RunString(`
+		const filesystem = require("fs");
+		filesystem.mkdirSync(".", { recursive: true });
+		const file = filesystem.openSync("value.txt", { write: true, create: true });
+		const result = [
+			typeof filesystem.createReadStream,
+			typeof filesystem.createWriteStream,
+			"readable" in file,
+			"writable" in file
+		].join("|");
+		file.close();
+		result;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.String(); got != "undefined|undefined|false|false" {
+		t.Fatalf("disabled stream surface = %q", got)
+	}
+}
+
+func TestRuntimeCoreRejectsConflictingBackend(t *testing.T) {
+	rt := goja.New()
+	first := afero.NewMemMapFs()
+	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+		t.Fatalf("equivalent configuration was rejected: %v", err)
+	}
+	err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	if err == nil || !strings.Contains(err.Error(), "backend") {
+		t.Fatalf("backend conflict error = %v", err)
+	}
+}
+
+func TestRuntimeCoreRejectsConflictingCwdAndChunkSize(t *testing.T) {
+	rt := goja.New()
+	backend := afero.NewMemMapFs()
+	if err := Enable(rt,
+		WithFS(backend),
+		WithCwd("/first"),
+		WithStreamChunkSize(1024),
+	); err != nil {
+		t.Fatal(err)
+	}
+	for name, options := range map[string][]Option{
+		"cwd": {
+			WithFS(backend), WithCwd("/second"), WithStreamChunkSize(1024),
+		},
+		"chunk size": {
+			WithFS(backend), WithCwd("/first"), WithStreamChunkSize(2048),
+		},
+	} {
+		err := Enable(rt, options...)
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s conflict error = %v", name, err)
+		}
+	}
+}
+
+func TestEnableWithLoopRejectsForeignRuntime(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	err := EnableWithLoop(goja.New(), loop, WithFS(afero.NewMemMapFs()))
+	if err == nil || !strings.Contains(err.Error(), "different runtime") {
+		t.Fatalf("foreign loop error = %v", err)
+	}
+}
+
+func TestRequireWithLoopRejectsForeignRuntime(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	loader := RequireWithLoop(loop, WithFS(afero.NewMemMapFs()))
+	rt := goja.New()
+	module := rt.NewObject()
+	_ = module.Set("exports", rt.NewObject())
+	defer func() {
+		value := recover()
+		if value == nil || !strings.Contains(fmt.Sprint(value), "different runtime") {
+			t.Fatalf("foreign loader panic = %v", value)
+		}
+	}()
+	loader(rt, module)
+}
 
 func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {
 	t.Helper()
@@ -125,7 +271,7 @@ func TestDenoRequireWithLoopRunsAsyncOperationsOffLoop(t *testing.T) {
 		Fs:      afero.NewMemMapFs(),
 		release: make(chan struct{}),
 	}
-	if err := backend.Fs.MkdirAll("/workspace", 0o755); err != nil {
+	if err := backend.MkdirAll("/workspace", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	loop := eventloop.NewEventLoop(

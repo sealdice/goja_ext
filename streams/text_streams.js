@@ -1,7 +1,4 @@
-(function () {
-  var TransformStream = globalThis.__goja_ext_streams_transform_stream;
-  var encodeUTF8 = globalThis.__goja_ext_streams_encode_utf8;
-  var decodeUTF8 = globalThis.__goja_ext_streams_decode_utf8;
+(function (TransformStream, encodeUTF8, decodeUTF8) {
 
   class TextEncoderStream {
     constructor() {
@@ -92,4 +89,4 @@
     TextEncoderStream: TextEncoderStream,
     TextDecoderStream: TextDecoderStream,
   };
-})()
+})

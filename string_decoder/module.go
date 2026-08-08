@@ -1,6 +1,8 @@
 package string_decoder
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"strings"
 	"unicode/utf8"
 
@@ -57,59 +59,75 @@ func normalizeEncoding(name string) string {
 
 func (sd *stringDecoder) write(call goja.FunctionCall) goja.Value {
 	data := buffer.Bytes(sd.rt, call.Argument(0))
-	if sd.encoding == "utf8" {
+	if sd.isStateful() {
 		sd.pending = append(sd.pending, data...)
-		return sd.rt.ToValue(sd.decodePending(false))
+		return sd.decodePending(false)
 	}
-	return sd.rt.ToValue(sd.encode(data))
+	return sd.encode(data)
 }
 
 func (sd *stringDecoder) end(call goja.FunctionCall) goja.Value {
 	if v := call.Argument(0); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
 		data := buffer.Bytes(sd.rt, v)
-		if sd.encoding == "utf8" {
+		if sd.isStateful() {
 			sd.pending = append(sd.pending, data...)
 		} else {
-			return sd.rt.ToValue(sd.encode(data))
+			return sd.encode(data)
 		}
 	}
-	if sd.encoding == "utf8" {
+	if sd.isStateful() {
 		out := sd.decodePending(true)
 		sd.pending = nil
-		return sd.rt.ToValue(out)
+		return out
 	}
 	return sd.rt.ToValue("")
 }
 
 func (sd *stringDecoder) text(call goja.FunctionCall) goja.Value {
 	data := buffer.Bytes(sd.rt, call.Argument(0))
-	if sd.encoding == "utf8" {
+	if sd.isStateful() {
 		sd.pending = append(sd.pending, data...)
 		out := sd.decodePending(true)
 		sd.pending = nil
-		return sd.rt.ToValue(out)
+		return out
 	}
-	return sd.rt.ToValue(sd.encode(data))
+	return sd.encode(data)
 }
 
 func (sd *stringDecoder) fillLast(call goja.FunctionCall) goja.Value {
 	if v := call.Argument(0); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
 		sd.pending = append(sd.pending, buffer.Bytes(sd.rt, v)...)
 	}
-	if sd.encoding == "utf8" {
+	if sd.isStateful() {
 		out := sd.decodePending(true)
 		sd.pending = nil
-		return sd.rt.ToValue(out)
+		return out
 	}
 	data := sd.pending
 	sd.pending = nil
-	return sd.rt.ToValue(sd.encode(data))
+	return sd.encode(data)
 }
 
-// decodePending decodes sd.pending as UTF-8. When flush is false, an incomplete
-// trailing sequence is retained for the next write; when flush is true, the
-// whole incomplete tail is consumed as a single U+FFFD.
-func (sd *stringDecoder) decodePending(flush bool) string {
+func (sd *stringDecoder) isStateful() bool {
+	return sd.encoding == "utf8" || sd.encoding == "ucs2" || sd.encoding == "base64"
+}
+
+func (sd *stringDecoder) decodePending(flush bool) goja.Value {
+	switch sd.encoding {
+	case "utf8":
+		return sd.rt.ToValue(sd.decodePendingUTF8(flush))
+	case "ucs2":
+		return sd.decodePendingUTF16LE(flush)
+	case "base64":
+		return sd.rt.ToValue(sd.decodePendingBase64(flush))
+	default:
+		panic(sd.rt.NewTypeError("StringDecoder encoding is not stateful: %s", sd.encoding))
+	}
+}
+
+// decodePendingUTF8 retains an incomplete trailing sequence for the next
+// write, or consumes it as one U+FFFD when flushing.
+func (sd *stringDecoder) decodePendingUTF8(flush bool) string {
 	var sb strings.Builder
 	pending := sd.pending
 	for len(pending) > 0 {
@@ -133,8 +151,60 @@ func (sd *stringDecoder) decodePending(flush bool) string {
 	return sb.String()
 }
 
+func (sd *stringDecoder) decodePendingUTF16LE(flush bool) goja.Value {
+	usable := len(sd.pending) - len(sd.pending)%2
+	if !flush && usable >= 2 {
+		last := uint16(sd.pending[usable-2]) | uint16(sd.pending[usable-1])<<8
+		if last >= 0xd800 && last <= 0xdbff {
+			usable -= 2
+		}
+	}
+
+	units := make([]uint16, usable/2)
+	for i := range units {
+		units[i] = uint16(sd.pending[i*2]) | uint16(sd.pending[i*2+1])<<8
+	}
+	if flush {
+		sd.pending = nil
+	} else {
+		sd.pending = sd.pending[usable:]
+	}
+	return goja.StringFromUTF16(units)
+}
+
+func (sd *stringDecoder) decodePendingBase64(flush bool) string {
+	usable := len(sd.pending)
+	if !flush {
+		usable -= usable % 3
+	}
+	encoded := base64.StdEncoding.EncodeToString(sd.pending[:usable])
+	if flush {
+		sd.pending = nil
+	} else {
+		sd.pending = sd.pending[usable:]
+	}
+	return encoded
+}
+
 func (sd *stringDecoder) encode(data []byte) goja.Value {
-	return buffer.EncodeBytes(sd.rt, data, sd.rt.ToValue(sd.encoding))
+	switch sd.encoding {
+	case "ascii":
+		ascii := make([]byte, len(data))
+		for i, value := range data {
+			ascii[i] = value & 0x7f
+		}
+		return sd.rt.ToValue(string(ascii))
+	case "latin1":
+		latin1 := make([]rune, len(data))
+		for i, value := range data {
+			latin1[i] = rune(value)
+		}
+		return sd.rt.ToValue(string(latin1))
+	case "hex":
+		return sd.rt.ToValue(hex.EncodeToString(data))
+	default:
+		panic(sd.rt.NewTypeError("Unsupported StringDecoder encoding: %s", sd.encoding))
+	}
 }
 
 func Require(rt *goja.Runtime, module *goja.Object) {

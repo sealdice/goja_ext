@@ -1,6 +1,12 @@
 package websocket
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +17,166 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sealdice/goja_ext/eventloop"
 )
+
+type recordingDialer struct {
+	calls chan []string
+}
+
+func (d *recordingDialer) DialContext(
+	_ context.Context,
+	_ string,
+	_ http.Header,
+	protocols []string,
+	_ bool,
+) (*websocket.Conn, *http.Response, error) {
+	d.calls <- append([]string(nil), protocols...)
+	return nil, nil, errors.New("injected dial failure")
+}
+
+func TestEnableRejectsForeignEventLoop(t *testing.T) {
+	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
+	defer loop.Stop()
+	err := Enable(goja.New(), loop)
+	if err == nil || !strings.Contains(err.Error(), "different runtime") {
+		t.Fatalf("foreign loop error = %v", err)
+	}
+}
+
+func TestNewUsesInstanceScopedDependencies(t *testing.T) {
+	first := New()
+	second := New()
+
+	if first.manager == second.manager {
+		t.Fatal("New() modules unexpectedly share a connection manager")
+	}
+	if first.manager == GlobalConnManager || second.manager == GlobalConnManager {
+		t.Fatal("New() unexpectedly uses the compatibility global connection manager")
+	}
+	if first.logger == nil || second.logger == nil || first.dialer == nil || second.dialer == nil {
+		t.Fatal("New() did not initialize instance-scoped dependencies")
+	}
+}
+
+func TestInjectedDialerOwnsConnectionLifecycle(t *testing.T) {
+	loop := startLoop(t)
+	manager := &WebSocketManager{}
+	dialer := &recordingDialer{calls: make(chan []string, 1)}
+
+	runOnLoopSync(loop, func(vm *goja.Runtime) {
+		err := EnableWithOptions(vm, loop, WithDialer(dialer), WithConnectionManager(manager))
+		if err != nil {
+			t.Fatalf("enable websocket: %v", err)
+		}
+		_, err = vm.RunString(`
+			globalThis.__injectedError = "";
+			const ws = new WebSocket("ws://example.invalid/socket", ["chat", "json"]);
+			ws.onerror = (event) => { globalThis.__injectedError = String(event.error || "error"); };
+		`)
+		if err != nil {
+			t.Fatalf("construct websocket: %v", err)
+		}
+	})
+
+	select {
+	case protocols := <-dialer.calls:
+		if strings.Join(protocols, ",") != "chat,json" {
+			t.Fatalf("dial protocols = %v, want [chat json]", protocols)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("injected dialer was not called")
+	}
+
+	waitForCondition(t, time.Second, func() bool {
+		return manager.Len() == 0
+	})
+}
+
+func TestWebSocketTLSDefaultsToVerification(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer closeTestConnection(t, conn)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.StartTLS()
+	defer srv.Close()
+	wssURL := "wss" + strings.TrimPrefix(srv.URL, "https")
+
+	loop := startLoop(t)
+	defaultManager := &WebSocketManager{}
+	runOnLoopSync(loop, func(vm *goja.Runtime) {
+		err := EnableWithOptions(vm, loop, WithConnectionManager(defaultManager))
+		if err != nil {
+			t.Fatalf("enable default websocket: %v", err)
+		}
+		_, err = vm.RunString(`
+			globalThis.__tlsOpened = false;
+			globalThis.__tlsError = "";
+			const ws = new WebSocket("` + wssURL + `");
+			ws.onopen = () => { globalThis.__tlsOpened = true; ws.close(); };
+			ws.onerror = (event) => { globalThis.__tlsError = String(event.error || "error"); };
+		`)
+		if err != nil {
+			t.Fatalf("construct default websocket: %v", err)
+		}
+	})
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		failed := false
+		runOnLoopSync(loop, func(vm *goja.Runtime) {
+			failed = vm.Get("__tlsError").String() != ""
+			if vm.Get("__tlsOpened").ToBoolean() {
+				t.Fatal("default TLS configuration accepted an untrusted certificate")
+			}
+		})
+		return failed
+	})
+
+	trustedLoop := startLoop(t)
+	trustedManager := &WebSocketManager{}
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	runOnLoopSync(trustedLoop, func(vm *goja.Runtime) {
+		err := EnableWithOptions(
+			vm,
+			trustedLoop,
+			WithConnectionManager(trustedManager),
+			WithTLSConfig(&tls.Config{RootCAs: roots}),
+		)
+		if err != nil {
+			t.Fatalf("enable trusted websocket: %v", err)
+		}
+		_, err = vm.RunString(`
+			globalThis.__trustedOpened = false;
+			globalThis.__trustedError = "";
+			const ws = new WebSocket("` + wssURL + `");
+			ws.onopen = () => { globalThis.__trustedOpened = true; ws.close(); };
+			ws.onerror = (event) => { globalThis.__trustedError = String(event.error || "error"); };
+		`)
+		if err != nil {
+			t.Fatalf("construct trusted websocket: %v", err)
+		}
+	})
+
+	waitForCondition(t, 3*time.Second, func() bool {
+		opened := false
+		runOnLoopSync(trustedLoop, func(vm *goja.Runtime) {
+			if errText := vm.Get("__trustedError").String(); errText != "" {
+				t.Fatalf("trusted TLS websocket failed: %s", errText)
+			}
+			opened = vm.Get("__trustedOpened").ToBoolean()
+		})
+		return opened
+	})
+}
 
 func startLoop(t *testing.T) *eventloop.EventLoop {
 	t.Helper()
@@ -44,6 +210,13 @@ func waitForCondition(t *testing.T, timeout time.Duration, check func() bool) {
 	t.Fatal("timeout waiting for condition")
 }
 
+func closeTestConnection(t *testing.T, connection *websocket.Conn) {
+	t.Helper()
+	if err := connection.Close(); err != nil {
+		t.Logf("close test websocket: %v", err)
+	}
+}
+
 func TestWebSocketBasicMessage(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +224,7 @@ func TestWebSocketBasicMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("hello-ws"))
 	}))
 	defer srv.Close()
@@ -62,7 +235,10 @@ func TestWebSocketBasicMessage(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, err := vm.RunString(`globalThis.__wsMsg = ""; globalThis.__wsErr = "";`)
 		if err != nil {
 			t.Fatalf("init ws globals failed: %v", err)
@@ -106,7 +282,10 @@ func TestWebSocketReadyStateConstants(t *testing.T) {
 	var got string
 	var runErr error
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		v, err := vm.RunString(`JSON.stringify([WebSocket.CONNECTING, WebSocket.OPEN, WebSocket.CLOSING, WebSocket.CLOSED])`)
 		if err != nil {
 			runErr = err
@@ -129,7 +308,7 @@ func TestWebSocketBinaryMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.BinaryMessage, []byte{1, 2, 3})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -145,7 +324,10 @@ func TestWebSocketBinaryMessage(t *testing.T) {
 
 	var binErr, binVal, binKind string
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`globalThis.__bin = ""; globalThis.__kind = ""; globalThis.__err = "";`)
 		_, _ = vm.RunString(`
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -193,7 +375,7 @@ func TestWebSocketAddRemoveEventListener(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("ping"))
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -209,7 +391,10 @@ func TestWebSocketAddRemoveEventListener(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__c1 = 0; globalThis.__c2 = 0; globalThis.__err1 = "";
 			const ws = new WebSocket("` + url + `");
@@ -310,7 +495,7 @@ func TestWebSocketCloseWithCodeReason(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -324,7 +509,10 @@ func TestWebSocketCloseWithCodeReason(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__hasExpected = false;
 			globalThis.__closeCount = 0;
@@ -382,7 +570,10 @@ func TestWebSocketConnectError(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__err = ""; globalThis.__opened = false;
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -426,7 +617,7 @@ func TestWebSocketSendNotOpen(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -440,7 +631,10 @@ func TestWebSocketSendNotOpen(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__err = "";
 			const ws = new WebSocket("` + wsURL(srv.URL) + `");
@@ -479,7 +673,7 @@ func TestWebSocketProtocolNegotiation(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -494,7 +688,10 @@ func TestWebSocketProtocolNegotiation(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__proto1 = ""; globalThis.__err1 = "";
 			const ws = new WebSocket("` + url + `", ["chat", "json"]);
@@ -556,7 +753,7 @@ func TestWebSocketConnManagerLifecycle(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer closeTestConnection(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -571,7 +768,10 @@ func TestWebSocketConnManagerLifecycle(t *testing.T) {
 	t.Cleanup(func() { GlobalConnManager.CloseAll() })
 
 	runOnLoopSync(loop, func(vm *goja.Runtime) {
-		Enable(vm, loop)
+		if err := Enable(vm, loop); err != nil {
+			t.Error(err)
+			return
+		}
 		_, _ = vm.RunString(`
 			globalThis.__opened = 0; globalThis.__err = "";
 			const mk = () => {

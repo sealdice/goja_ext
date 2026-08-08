@@ -204,7 +204,9 @@ func (r *RequireModule) getCurrentModulePath() string {
 
 func (r *RequireModule) createModuleObject() *js.Object {
 	module := r.runtime.NewObject()
-	module.Set("exports", r.runtime.NewObject())
+	if err := module.Set("exports", r.runtime.NewObject()); err != nil {
+		panic(err)
+	}
 	return module
 }
 

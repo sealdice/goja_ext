@@ -14,12 +14,15 @@ import (
 	"github.com/sealdice/goja_ext/errors"
 	"github.com/sealdice/goja_ext/goutil"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 
 	"github.com/dop251/base64dec"
 	"golang.org/x/text/encoding/unicode"
 )
 
 const ModuleName = "buffer"
+
+var exportsKey = runtimehost.NewKey("buffer.exports")
 
 type Buffer struct {
 	r *goja.Runtime
@@ -43,7 +46,9 @@ var (
 )
 
 func Enable(runtime *goja.Runtime) {
-	runtime.Set("Buffer", require.Require(runtime, ModuleName).ToObject(runtime).Get("Buffer"))
+	if err := runtime.Set("Buffer", require.Require(runtime, ModuleName).ToObject(runtime).Get("Buffer")); err != nil {
+		panic(err)
+	}
 }
 
 func Bytes(r *goja.Runtime, v goja.Value) []byte {
@@ -140,8 +145,18 @@ func (b *Buffer) ctor(call goja.ConstructorCall) (res *goja.Object) {
 	arg := call.Argument(0)
 	switch arg.ExportType() {
 	case reflectTypeInt, reflectTypeFloat:
-		panic(b.r.NewTypeError("Calling the Buffer constructor with numeric argument is not implemented yet"))
-		// TODO implement
+		size := arg.ToFloat()
+		const maxBufferLength = float64(math.MaxUint32)
+		if math.IsNaN(size) || math.IsInf(size, 0) || size < 0 || size > maxBufferLength {
+			panic(errors.NewRangeError(
+				b.r,
+				errors.ErrCodeOutOfRange,
+				`The value of "size" is out of range. It must be >= 0 && <= %d. Received %v`,
+				uint64(math.MaxUint32),
+				size,
+			))
+		}
+		return b.fromBytes(make([]byte, int64(size)))
 	}
 	return b._from(call.Arguments...)
 }
@@ -1114,6 +1129,22 @@ func signExtend(value int64, numBytes int64) int64 {
 }
 
 func Require(runtime *goja.Runtime, module *goja.Object) {
+	if err := module.Set("exports", Exports(runtime)); err != nil {
+		panic(err)
+	}
+}
+
+// Exports returns the canonical buffer module exports for runtime.
+func Exports(runtime *goja.Runtime) *goja.Object {
+	value := runtimehost.GetOrCreate(runtime, exportsKey, func() any {
+		exports := runtime.NewObject()
+		initializeExports(runtime, exports)
+		return exports
+	})
+	return value.(*goja.Object)
+}
+
+func initializeExports(runtime *goja.Runtime, exports *goja.Object) {
 	b := &Buffer{r: runtime}
 	uint8Array := runtime.Get("Uint8Array")
 	if c, ok := goja.AssertConstructor(uint8Array); ok {
@@ -1122,124 +1153,142 @@ func Require(runtime *goja.Runtime, module *goja.Object) {
 		panic(runtime.NewTypeError("Uint8Array is not a constructor"))
 	}
 	uint8ArrayObj := uint8Array.ToObject(runtime)
+	set := func(object *goja.Object, name string, value interface{}) {
+		if err := object.Set(name, value); err != nil {
+			panic(err)
+		}
+	}
 
 	ctor := runtime.ToValue(b.ctor).ToObject(runtime)
-	ctor.SetPrototype(uint8ArrayObj)
-	ctor.DefineDataPropertySymbol(symApi, runtime.ToValue(b), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	if err := ctor.SetPrototype(uint8ArrayObj); err != nil {
+		panic(err)
+	}
+	if err := ctor.DefineDataPropertySymbol(
+		symApi,
+		runtime.ToValue(b),
+		goja.FLAG_FALSE,
+		goja.FLAG_FALSE,
+		goja.FLAG_FALSE,
+	); err != nil {
+		panic(err)
+	}
 	b.bufferCtorObj = ctor
 	b.uint8ArrayCtorObj = uint8ArrayObj
 
 	proto := runtime.NewObject()
-	proto.SetPrototype(uint8ArrayObj.Get("prototype").ToObject(runtime))
-	proto.DefineDataProperty("constructor", ctor, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_FALSE)
-	proto.Set("equals", b.proto_equals)
-	proto.Set("toString", b.proto_toString)
-	proto.Set("readBigInt64BE", b.readBigInt64BE)
-	proto.Set("readBigInt64LE", b.readBigInt64LE)
-	proto.Set("readBigUInt64BE", b.readBigUInt64BE)
+	if err := proto.SetPrototype(uint8ArrayObj.Get("prototype").ToObject(runtime)); err != nil {
+		panic(err)
+	}
+	if err := proto.DefineDataProperty("constructor", ctor, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_FALSE); err != nil {
+		panic(err)
+	}
+	set(proto, "equals", b.proto_equals)
+	set(proto, "toString", b.proto_toString)
+	set(proto, "readBigInt64BE", b.readBigInt64BE)
+	set(proto, "readBigInt64LE", b.readBigInt64LE)
+	set(proto, "readBigUInt64BE", b.readBigUInt64BE)
 	// aliases for readBigUInt64BE
-	proto.Set("readBigUint64BE", b.readBigUInt64BE)
+	set(proto, "readBigUint64BE", b.readBigUInt64BE)
 
-	proto.Set("readBigUInt64LE", b.readBigUInt64LE)
+	set(proto, "readBigUInt64LE", b.readBigUInt64LE)
 	// aliases for readBigUInt64LE
-	proto.Set("readBigUint64LE", b.readBigUInt64LE)
+	set(proto, "readBigUint64LE", b.readBigUInt64LE)
 
-	proto.Set("readDoubleBE", b.readDoubleBE)
-	proto.Set("readDoubleLE", b.readDoubleLE)
-	proto.Set("readFloatBE", b.readFloatBE)
-	proto.Set("readFloatLE", b.readFloatLE)
-	proto.Set("readInt8", b.readInt8)
-	proto.Set("readInt16BE", b.readInt16BE)
-	proto.Set("readInt16LE", b.readInt16LE)
-	proto.Set("readInt32BE", b.readInt32BE)
-	proto.Set("readInt32LE", b.readInt32LE)
-	proto.Set("readIntBE", b.readIntBE)
-	proto.Set("readIntLE", b.readIntLE)
-	proto.Set("readUInt8", b.readUInt8)
+	set(proto, "readDoubleBE", b.readDoubleBE)
+	set(proto, "readDoubleLE", b.readDoubleLE)
+	set(proto, "readFloatBE", b.readFloatBE)
+	set(proto, "readFloatLE", b.readFloatLE)
+	set(proto, "readInt8", b.readInt8)
+	set(proto, "readInt16BE", b.readInt16BE)
+	set(proto, "readInt16LE", b.readInt16LE)
+	set(proto, "readInt32BE", b.readInt32BE)
+	set(proto, "readInt32LE", b.readInt32LE)
+	set(proto, "readIntBE", b.readIntBE)
+	set(proto, "readIntLE", b.readIntLE)
+	set(proto, "readUInt8", b.readUInt8)
 	// aliases for readUInt8
-	proto.Set("readUint8", b.readUInt8)
+	set(proto, "readUint8", b.readUInt8)
 
-	proto.Set("readUInt16BE", b.readUInt16BE)
+	set(proto, "readUInt16BE", b.readUInt16BE)
 	// aliases for readUInt16BE
-	proto.Set("readUint16BE", b.readUInt16BE)
+	set(proto, "readUint16BE", b.readUInt16BE)
 
-	proto.Set("readUInt16LE", b.readUInt16LE)
+	set(proto, "readUInt16LE", b.readUInt16LE)
 	// aliases for readUInt16LE
-	proto.Set("readUint16LE", b.readUInt16LE)
+	set(proto, "readUint16LE", b.readUInt16LE)
 
-	proto.Set("readUInt32BE", b.readUInt32BE)
+	set(proto, "readUInt32BE", b.readUInt32BE)
 	// aliases for readUInt32BE
-	proto.Set("readUint32BE", b.readUInt32BE)
+	set(proto, "readUint32BE", b.readUInt32BE)
 
-	proto.Set("readUInt32LE", b.readUInt32LE)
+	set(proto, "readUInt32LE", b.readUInt32LE)
 	// aliases for readUInt32LE
-	proto.Set("readUint32LE", b.readUInt32LE)
+	set(proto, "readUint32LE", b.readUInt32LE)
 
-	proto.Set("readUIntBE", b.readUIntBE)
+	set(proto, "readUIntBE", b.readUIntBE)
 	// aliases for readUIntBE
-	proto.Set("readUintBE", b.readUIntBE)
+	set(proto, "readUintBE", b.readUIntBE)
 
-	proto.Set("readUIntLE", b.readUIntLE)
+	set(proto, "readUIntLE", b.readUIntLE)
 	// aliases for readUIntLE
-	proto.Set("readUintLE", b.readUIntLE)
-	proto.Set("write", b.write)
-	proto.Set("writeBigInt64BE", b.writeBigInt64BE)
-	proto.Set("writeBigInt64LE", b.writeBigInt64LE)
-	proto.Set("writeBigUInt64BE", b.writeBigUInt64BE)
+	set(proto, "readUintLE", b.readUIntLE)
+	set(proto, "write", b.write)
+	set(proto, "writeBigInt64BE", b.writeBigInt64BE)
+	set(proto, "writeBigInt64LE", b.writeBigInt64LE)
+	set(proto, "writeBigUInt64BE", b.writeBigUInt64BE)
 	// aliases for writeBigUInt64BE
-	proto.Set("writeBigUint64BE", b.writeBigUInt64BE)
+	set(proto, "writeBigUint64BE", b.writeBigUInt64BE)
 
-	proto.Set("writeBigUInt64LE", b.writeBigUInt64LE)
+	set(proto, "writeBigUInt64LE", b.writeBigUInt64LE)
 	// aliases for writeBigUInt64LE
-	proto.Set("writeBigUint64LE", b.writeBigUInt64LE)
+	set(proto, "writeBigUint64LE", b.writeBigUInt64LE)
 
-	proto.Set("writeDoubleBE", b.writeDoubleBE)
-	proto.Set("writeDoubleLE", b.writeDoubleLE)
-	proto.Set("writeFloatBE", b.writeFloatBE)
-	proto.Set("writeFloatLE", b.writeFloatLE)
-	proto.Set("writeInt8", b.writeInt8)
-	proto.Set("writeInt16BE", b.writeInt16BE)
-	proto.Set("writeInt16LE", b.writeInt16LE)
-	proto.Set("writeInt32BE", b.writeInt32BE)
-	proto.Set("writeInt32LE", b.writeInt32LE)
-	proto.Set("writeIntBE", b.writeIntBE)
-	proto.Set("writeIntLE", b.writeIntLE)
-	proto.Set("writeUInt8", b.writeUInt8)
+	set(proto, "writeDoubleBE", b.writeDoubleBE)
+	set(proto, "writeDoubleLE", b.writeDoubleLE)
+	set(proto, "writeFloatBE", b.writeFloatBE)
+	set(proto, "writeFloatLE", b.writeFloatLE)
+	set(proto, "writeInt8", b.writeInt8)
+	set(proto, "writeInt16BE", b.writeInt16BE)
+	set(proto, "writeInt16LE", b.writeInt16LE)
+	set(proto, "writeInt32BE", b.writeInt32BE)
+	set(proto, "writeInt32LE", b.writeInt32LE)
+	set(proto, "writeIntBE", b.writeIntBE)
+	set(proto, "writeIntLE", b.writeIntLE)
+	set(proto, "writeUInt8", b.writeUInt8)
 	// aliases for writeUInt8
-	proto.Set("writeUint8", b.writeUInt8)
+	set(proto, "writeUint8", b.writeUInt8)
 
-	proto.Set("writeUInt16BE", b.writeUInt16BE)
+	set(proto, "writeUInt16BE", b.writeUInt16BE)
 	// aliases for writeUInt16BE
-	proto.Set("writeUint16BE", b.writeUInt16BE)
+	set(proto, "writeUint16BE", b.writeUInt16BE)
 
-	proto.Set("writeUInt16LE", b.writeUInt16LE)
+	set(proto, "writeUInt16LE", b.writeUInt16LE)
 	// aliases for writeUInt16LE
-	proto.Set("writeUint16LE", b.writeUInt16LE)
+	set(proto, "writeUint16LE", b.writeUInt16LE)
 
-	proto.Set("writeUInt32BE", b.writeUInt32BE)
+	set(proto, "writeUInt32BE", b.writeUInt32BE)
 	// aliases for writeUInt32BE
-	proto.Set("writeUint32BE", b.writeUInt32BE)
+	set(proto, "writeUint32BE", b.writeUInt32BE)
 
-	proto.Set("writeUInt32LE", b.writeUInt32LE)
+	set(proto, "writeUInt32LE", b.writeUInt32LE)
 	// aliases for writeUInt32LE
-	proto.Set("writeUint32LE", b.writeUInt32LE)
+	set(proto, "writeUint32LE", b.writeUInt32LE)
 
-	proto.Set("writeUIntBE", b.writeUIntBE)
+	set(proto, "writeUIntBE", b.writeUIntBE)
 	// aliases for writeUIntBE
-	proto.Set("writeUintBE", b.writeUIntBE)
+	set(proto, "writeUintBE", b.writeUIntBE)
 
-	proto.Set("writeUIntLE", b.writeUIntLE)
+	set(proto, "writeUIntLE", b.writeUIntLE)
 	// aliases for writeUIntLE
-	proto.Set("writeUintLE", b.writeUIntLE)
+	set(proto, "writeUintLE", b.writeUIntLE)
 
-	ctor.Set("prototype", proto)
-	ctor.Set("poolSize", 8192)
-	ctor.Set("from", b.from)
-	ctor.Set("alloc", b.alloc)
-	ctor.Set("concat", b.concat)
+	set(ctor, "prototype", proto)
+	set(ctor, "poolSize", 8192)
+	set(ctor, "from", b.from)
+	set(ctor, "alloc", b.alloc)
+	set(ctor, "concat", b.concat)
 
-	exports := module.Get("exports").(*goja.Object)
-	exports.Set("Buffer", ctor)
+	set(exports, "Buffer", ctor)
 }
 
 func init() {

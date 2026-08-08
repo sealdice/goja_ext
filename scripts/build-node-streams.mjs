@@ -11,7 +11,7 @@ await build({
   target: 'es2015',
   platform: 'browser',
   globalName: 'GojaNodeStream',
-  external: ['events'],
+  external: ['events', 'goja:stream/web'],
   alias: { 'events-universal': 'events' },
   define: {
     'process.env.NODE_ENV': '"production"'

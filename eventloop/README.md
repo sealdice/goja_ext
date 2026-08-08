@@ -25,4 +25,9 @@ loop.RunOnLoop(func(vm *goja.Runtime) {
 ## 说明
 
 - goja 非 goroutine-safe：所有引擎调用必须发生在循环线程。
+- 一个 loop 只拥有它创建的 runtime；将该 loop 传给其他 runtime 的异步模块会
+  返回 ownership 错误。
+- eventloop 有意静态依赖 `console`，因为 `NewEventLoop()` 默认安装 console。
+  `EnableConsole(false)` 关闭运行时安装，但不会改变 Go 的编译依赖。只需要调度
+  抽象时可实现 `runtimehost.Scheduler`。
 - 若 runtime 无 eventloop，`timers` 模块导出的函数调用会抛 `"timers require an event loop"`。

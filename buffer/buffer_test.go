@@ -75,6 +75,53 @@ func TestBufferFrom(t *testing.T) {
 	}
 }
 
+func TestBufferNumericConstructor(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+
+	v, err := vm.RunString(`
+		const Buffer = require("node:buffer").Buffer;
+		const a = new Buffer(4);
+		const b = Buffer(3.9);
+		JSON.stringify([
+			a instanceof Buffer,
+			a instanceof Uint8Array,
+			a.length,
+			a.toString("hex"),
+			b.length
+		]);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := v.String(), `[true,true,4,"00000000",3]`; got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
+func TestBufferNumericConstructorRejectsInvalidSize(t *testing.T) {
+	vm := goja.New()
+	new(require.Registry).Enable(vm)
+
+	v, err := vm.RunString(`
+		const Buffer = require("node:buffer").Buffer;
+		[-1, NaN, Infinity].map((size) => {
+			try {
+				new Buffer(size);
+				return "missing";
+			} catch (error) {
+				return error.name + ":" + error.code;
+			}
+		}).join(",");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := v.String(), "RangeError:ERR_OUT_OF_RANGE,RangeError:ERR_OUT_OF_RANGE,RangeError:ERR_OUT_OF_RANGE"; got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+}
+
 func TestFromBase64(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
@@ -128,7 +175,9 @@ func TestWrapBytes(t *testing.T) {
 	new(require.Registry).Enable(vm)
 	b := []byte{1, 2, 3}
 	buffer := GetApi(vm)
-	vm.Set("b", buffer.WrapBytes(b))
+	if err := vm.Set("b", buffer.WrapBytes(b)); err != nil {
+		t.Fatal(err)
+	}
 	Enable(vm)
 	_, err := vm.RunString(`
 		if (typeof Buffer !== "function") {

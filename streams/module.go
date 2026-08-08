@@ -6,6 +6,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 const (
@@ -33,7 +34,7 @@ var exportNames = [...]string{
 //go:embed text_streams.js
 var textStreamsSource string
 
-var moduleSymbol = goja.NewSymbol("goja_ext.streams.module")
+var moduleKey = runtimehost.NewKey("streams.exports")
 
 //go:embed internal/polyfill/ponyfill.js
 var ponyfillSource string
@@ -85,14 +86,18 @@ func Exports(rt *goja.Runtime) *goja.Object {
 	return getExports(rt)
 }
 
+// Initialized reports whether Web Streams have already been initialized for
+// rt without initializing them as a side effect.
+func Initialized(rt *goja.Runtime) bool {
+	_, ok := runtimehost.Load(rt, moduleKey)
+	return ok
+}
+
 func getExports(rt *goja.Runtime) *goja.Object {
-	global := rt.GlobalObject()
-	if value := global.GetSymbol(moduleSymbol); value != nil &&
-		!goja.IsUndefined(value) && !goja.IsNull(value) {
-		if exports, ok := value.(*goja.Object); ok {
-			ensureTextExports(rt, exports)
-			return exports
-		}
+	if value, ok := runtimehost.Load(rt, moduleKey); ok {
+		exports := value.(*goja.Object)
+		ensureTextExports(rt, exports)
+		return exports
 	}
 
 	ensureAsyncIteratorSymbol(rt)
@@ -110,10 +115,8 @@ func getExports(rt *goja.Runtime) *goja.Object {
 			panic(fmt.Sprintf("streams: embedded polyfill is missing export %q", name))
 		}
 	}
-	if err := global.SetSymbol(moduleSymbol, exports); err != nil {
-		panic(err)
-	}
 	ensureTextExports(rt, exports)
+	runtimehost.Store(rt, moduleKey, exports)
 	return exports
 }
 
@@ -122,30 +125,21 @@ func ensureTextExports(rt *goja.Runtime, exports *goja.Object) {
 		return
 	}
 
-	global := rt.GlobalObject()
-	const (
-		transformName = "__goja_ext_streams_transform_stream"
-		encodeName    = "__goja_ext_streams_encode_utf8"
-		decodeName    = "__goja_ext_streams_decode_utf8"
-	)
-	if err := global.Set(transformName, exports.Get("TransformStream")); err != nil {
-		panic(err)
+	initializer, err := rt.RunProgram(textStreamsProgram)
+	if err != nil {
+		panic(fmt.Errorf("streams: load text stream initializer: %w", err))
 	}
-	if err := global.Set(encodeName, func(call goja.FunctionCall) goja.Value {
+	initialize, ok := goja.AssertFunction(initializer)
+	if !ok {
+		panic("streams: text stream program did not return an initializer")
+	}
+	encode := rt.ToValue(func(call goja.FunctionCall) goja.Value {
 		return encodeUTF8(rt, call)
-	}); err != nil {
-		panic(err)
-	}
-	if err := global.Set(decodeName, func(call goja.FunctionCall) goja.Value {
+	})
+	decode := rt.ToValue(func(call goja.FunctionCall) goja.Value {
 		return decodeUTF8(rt, call)
-	}); err != nil {
-		panic(err)
-	}
-
-	value, err := rt.RunProgram(textStreamsProgram)
-	_ = global.Delete(transformName)
-	_ = global.Delete(encodeName)
-	_ = global.Delete(decodeName)
+	})
+	value, err := initialize(goja.Undefined(), exports.Get("TransformStream"), encode, decode)
 	if err != nil {
 		panic(fmt.Errorf("streams: initialize text streams: %w", err))
 	}

@@ -3,6 +3,8 @@ package fs
 import (
 	"strings"
 	"testing"
+
+	_ "github.com/sealdice/goja_ext/streams/node"
 )
 
 func TestNodeCallbackAPI(t *testing.T) {
@@ -102,18 +104,19 @@ func TestNodeCreateWriteStream(t *testing.T) {
 	}
 }
 
-func TestNodeRmRealpathAccess(t *testing.T) {
+func TestNodeUnsupportedRealpathReturnsENOSYS(t *testing.T) {
 	result := runFSAPIScript(t, `
 		const fs = require("fs");
 		fs.mkdirSync("tmp", { recursive: true });
 		fs.writeFileSync("tmp/x.txt", "x");
 		fs.accessSync("tmp/x.txt");
-		const rp = fs.realpathSync("tmp/x.txt");
+		let code = "";
+		try { fs.realpathSync("tmp/x.txt"); } catch (error) { code = error.code; }
 		fs.rmSync("tmp", { recursive: true, force: true });
 		const gone = !fs.existsSync("tmp");
-		globalThis.__result = String(gone) + ":" + rp;
+		globalThis.__result = String(gone) + ":" + code;
 	`)
-	if result != "true:/workspace/tmp/x.txt" {
+	if result != "true:ENOSYS" {
 		t.Fatalf("unexpected: %s", result)
 	}
 }

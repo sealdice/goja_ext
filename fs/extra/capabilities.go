@@ -1,15 +1,72 @@
-// Package extra is reserved for opt-in filesystem capabilities that are not
-// part of the Afero-backed Deno FS core.
-//
-// TODO: install these APIs only through explicit extension registration:
-//   - lstat/readlink/symlink via afero.Lstater, afero.LinkReader, and
-//     afero.Linker when the backend provides them.
-//   - hard links via a host capability, because Afero core has no hard-link
-//     interface.
-//   - watch, lock, terminal, raw mode, and realpath through dedicated host
-//     capabilities.
-//
-// The fs package must not import this package. Keeping it separate lets
-// embedders delete this directory without changing the core path, handle, or
-// WHATWG Stream implementation.
+// Package extra adapts optional host filesystem operations to fs.Capability.
 package extra
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"syscall"
+
+	rootfs "github.com/sealdice/goja_ext/fs"
+	"github.com/spf13/afero"
+)
+
+type aferoLinks struct {
+	backend afero.Fs
+}
+
+// FromAfero returns link-related capabilities advertised by backend. Afero's
+// Lstater boolean is preserved: a fallback to Stat is reported as ENOSYS.
+func FromAfero(backend afero.Fs) []rootfs.Capability {
+	if backend == nil {
+		return nil
+	}
+	_, hasLstat := backend.(afero.Lstater)
+	_, hasReadlink := backend.(afero.LinkReader)
+	_, hasSymlink := backend.(afero.Linker)
+	if !hasLstat && !hasReadlink && !hasSymlink {
+		return nil
+	}
+	return []rootfs.Capability{&aferoLinks{backend: backend}}
+}
+
+func (a *aferoLinks) CapabilityIdentity() any { return a.backend }
+
+func (a *aferoLinks) Lstat(name string) (os.FileInfo, error) {
+	lstater, ok := a.backend.(afero.Lstater)
+	if !ok {
+		return nil, syscall.ENOSYS
+	}
+	info, usedLstat, err := lstater.LstatIfPossible(name)
+	if err != nil {
+		return nil, err
+	}
+	if !usedLstat {
+		return nil, syscall.ENOSYS
+	}
+	return info, nil
+}
+
+func (a *aferoLinks) Readlink(name string) (string, error) {
+	reader, ok := a.backend.(afero.LinkReader)
+	if !ok {
+		return "", syscall.ENOSYS
+	}
+	target, err := reader.ReadlinkIfPossible(name)
+	if errors.Is(err, afero.ErrNoReadlink) {
+		return "", fmt.Errorf("%w: %v", syscall.ENOSYS, err)
+	}
+	return target, err
+}
+
+func (a *aferoLinks) Symlink(target, name string) error {
+	linker, ok := a.backend.(afero.Linker)
+	if !ok {
+		return syscall.ENOSYS
+	}
+	err := linker.SymlinkIfPossible(target, name)
+	if errors.Is(err, afero.ErrNoSymlink) {
+		return fmt.Errorf("%w: %v", syscall.ENOSYS, err)
+	}
+	return err
+}

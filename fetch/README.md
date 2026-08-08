@@ -1,8 +1,9 @@
 # fetch
 
-`fetch` 为 Goja 提供一组面向 JavaScript 的 Fetch API 基础能力。
-HTTP 请求由 Go 层的 `go-resty/resty/v2` 执行，Resty 类型和配置不会暴露给
-JavaScript。
+`fetch` 为 Goja 提供 Fetch API。Headers、Body、Request、Response 和 FormData
+行为来自固定版本的 `bare-fetch` / `bare-form-data` API 层；HTTP 请求仍由 Go
+层的 `go-resty/resty/v2` 执行。项目没有嵌入 `bare-http1`，Resty 类型和配置也
+不会暴露给 JavaScript。
 
 ## 提供的对象
 
@@ -13,6 +14,9 @@ JavaScript。
 - `Response`
 - `FormData`
 
+`require("fetch")` 返回包含上述构造函数的对象，并额外导出 `Blob` 和 `File`。
+模块对象本身不可调用；`Blob`、`File` 默认也不会写入全局对象。
+
 `EnableFetch` 另外注册全局 `fetch(url, init)` 函数与 `EventSource`（SSE）。
 `fetch` 返回 JavaScript `Promise<Response>`，因此必须提供项目的
 `eventloop.EventLoop`。
@@ -20,14 +24,22 @@ JavaScript。
 ## 支持范围
 
 - 常用请求方法和请求头
-- 字符串、ArrayBuffer、URLSearchParams、FormData 请求体
-- `Response.body`：**canonical `ReadableStream`**（`stream/web`），逐块流式交付，天然支持背压；`text()` / `json()` / `arrayBuffer()` 消费该流（浏览器语义：body 只能消费一次）
+- 字符串、ArrayBuffer、TypedArray、URLSearchParams、Blob、FormData 和
+  `ReadableStream` 请求体；发起网络请求前会完整缓冲上传体
+- `Response.body`：canonical `ReadableStream`（`stream/web`），逐块流式交付
+  并使用有界队列提供背压；`text()`、`json()`、`bytes()`、`arrayBuffer()`、
+  `buffer()` 和 `formData()` 都消费该流，body 只能消费一次
+- Request/Response `clone()`、Response `error()` / `redirect()` / `json()`、
+  Headers 标准迭代器与 `getSetCookie()`
 - **SSE**：`new EventSource(url)`，支持 `message`/`open`/`error` 事件、自定义事件名、自动重连（`retry` 字段）、`Last-Event-ID`、`close()`
 - `Headers`、`Request`、`Response`、`FormData` 的基础操作
 - 通过 `AbortSignal` 取消正在执行的请求
 - 超时、代理、自定义 HTTP Client 和 Transport
 
-API 范围不是完整的浏览器 Fetch 标准实现（例如 `Response.body` 的 cancel 语义、`mode`/`credentials` 的完整约束未实现）。
+API 范围不是完整的浏览器 Fetch 标准实现。当前不支持 `mode`、`credentials`、
+`cache`、JavaScript 侧可配置的 redirect policy、`integrity`、`keepalive`、
+`duplex` 和 Bare `agent`。传入非空 `agent` 会拒绝请求。真正的流式上传暂未
+实现；下载响应保持流式，并支持 cancel 和 AbortSignal。
 
 ## Go API
 
@@ -65,6 +77,8 @@ loop.RunOnLoop(func(rt *goja.Runtime) {
 - `WithRestyClient`
 
 这些选项只影响 Go 层执行器，不会成为 JavaScript 全局对象或模块导出。
+默认 client 最多跟随 20 次重定向；通过 `WithHTTPClient` 或
+`WithRestyClient` 传入的 client 保留调用方自己的重定向策略。
 
 ## JavaScript 示例
 
@@ -122,3 +136,14 @@ while (true) {
   console.log(value);
 }
 ```
+
+## 更新嵌入 bundle
+
+安装根目录开发依赖后运行：
+
+```bash
+npm run build:fetch
+```
+
+生成物、依赖版本锁和第三方许可证均提交到仓库，运行 fetch 不需要 Node.js 或
+`node_modules`。

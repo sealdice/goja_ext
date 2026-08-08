@@ -7,6 +7,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 const ModuleName = "path"
@@ -20,22 +21,22 @@ const (
 
 func Require(rt *goja.Runtime, module *goja.Object) {
 	exports := module.Get("exports").(*goja.Object)
-	hostCwd, err := os.Getwd()
-	if err != nil {
-		hostCwd = ""
-	}
-	buildPathModule(rt, exports, hostCwd)
+	buildPathModule(rt, exports)
 }
 
-func buildPathModule(rt *goja.Runtime, exports *goja.Object, hostCwd string) {
-	posixImpl := posixImpl{hostCwd: strings.ReplaceAll(hostCwd, "\\", "/")}
-	winImpl := win32Impl{hostCwd: hostCwd}
+func buildPathModule(rt *goja.Runtime, exports *goja.Object) {
+	posixImpl := posixImpl{cwd: func() string {
+		return strings.ReplaceAll(runtimehost.Cwd(rt), "\\", "/")
+	}}
+	winImpl := win32Impl{cwd: func() string { return runtimehost.Cwd(rt) }}
 	posix := newPathObject(rt, posixImpl)
 	win32 := newPathObject(rt, winImpl)
 
 	platform := pathImpl(posixImpl)
+	platformObject := posix
 	if os.PathSeparator == '\\' {
 		platform = winImpl
+		platformObject = win32
 	}
 
 	if err := exports.Set("sep", platform.sep()); err != nil {
@@ -48,7 +49,7 @@ func buildPathModule(rt *goja.Runtime, exports *goja.Object, hostCwd string) {
 		"join", "resolve", "normalize", "relative", "isAbsolute",
 		"basename", "dirname", "extname", "parse", "format", "toNamespacedPath",
 	} {
-		if err := exports.Set(name, posix.Get(name)); err != nil {
+		if err := exports.Set(name, platformObject.Get(name)); err != nil {
 			panic(err)
 		}
 	}
@@ -85,8 +86,12 @@ func newPathObject(rt *goja.Runtime, impl pathImpl) *goja.Object {
 			panic(err)
 		}
 	}
-	set("sep", func(goja.FunctionCall) goja.Value { return rt.ToValue(impl.sep()) })
-	set("delimiter", func(goja.FunctionCall) goja.Value { return rt.ToValue(impl.delimiter()) })
+	if err := obj.Set("sep", impl.sep()); err != nil {
+		panic(err)
+	}
+	if err := obj.Set("delimiter", impl.delimiter()); err != nil {
+		panic(err)
+	}
 	set("join", func(call goja.FunctionCall) goja.Value {
 		return rt.ToValue(impl.join(stringValues(call.Arguments)))
 	})
@@ -165,7 +170,7 @@ func property(obj *goja.Object, name string) string {
 // --- posix ---
 
 type posixImpl struct {
-	hostCwd string
+	cwd func() string
 }
 
 func (posixImpl) sep() string       { return posixSep }
@@ -179,7 +184,7 @@ func (p posixImpl) resolve(parts []string) string {
 	var resolved string
 	absolute := false
 	for i := len(parts) - 1; i >= -1 && !absolute; i-- {
-		part := p.hostCwd
+		part := p.cwd()
 		if i >= 0 {
 			part = parts[i]
 		}
