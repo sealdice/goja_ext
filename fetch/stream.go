@@ -199,53 +199,6 @@ func fetchReadableStream(rt *goja.Runtime, scheduler runtimehost.Scheduler, body
 	return stream
 }
 
-// bufferedReadableStream builds a canonical ReadableStream over a fixed buffer
-// (used by manually constructed Response objects).
-func bufferedReadableStream(rt *goja.Runtime, data []byte) goja.Value {
-	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
-		Pull: func(controller *goja.Object) goja.Value {
-			callFetchController(rt, controller, "enqueue", bytesValue(rt, data))
-			callFetchController(rt, controller, "close")
-			return goja.Undefined()
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-	return stream
-}
-
-// consumeBody reads the entire canonical ReadableStream into bytes, then
-// converts via convert. The returned value is a Promise.
-func consumeBody(rt *goja.Runtime, stream goja.Value, convert func(*goja.Runtime, []byte) (goja.Value, error)) goja.Value {
-	result, resolve, reject := rt.NewPromise()
-	var out []byte
-	consumed, err := streams.ConsumeReadableStream(rt, stream, func(chunk goja.Value) goja.Value {
-		out = append(out, bytesFromValue(chunk)...)
-		return goja.Undefined()
-	})
-	if err != nil {
-		_ = reject(rt.NewTypeError(err.Error()))
-		return rt.ToValue(result)
-	}
-	fetchThen(rt, rt.ToValue(consumed),
-		func(goja.FunctionCall) goja.Value {
-			value, convErr := convert(rt, out)
-			if convErr != nil {
-				_ = reject(rt.NewTypeError(convErr.Error()))
-				return goja.Undefined()
-			}
-			_ = resolve(value)
-			return goja.Undefined()
-		},
-		func(call goja.FunctionCall) goja.Value {
-			_ = reject(call.Argument(0))
-			return goja.Undefined()
-		},
-	)
-	return rt.ToValue(result)
-}
-
 func callFetchController(rt *goja.Runtime, controller *goja.Object, name string, args ...goja.Value) {
 	fn, ok := goja.AssertFunction(controller.Get(name))
 	if !ok {
@@ -263,20 +216,4 @@ func bytesValue(rt *goja.Runtime, data []byte) goja.Value {
 		panic(err)
 	}
 	return typed
-}
-
-func fetchThen(
-	rt *goja.Runtime,
-	value goja.Value,
-	onFulfilled func(goja.FunctionCall) goja.Value,
-	onRejected func(goja.FunctionCall) goja.Value,
-) {
-	object := value.ToObject(rt)
-	method, ok := goja.AssertFunction(object.Get("then"))
-	if !ok {
-		panic(rt.NewTypeError("fetch: expected a Promise-compatible value"))
-	}
-	if _, err := method(object, rt.ToValue(onFulfilled), rt.ToValue(onRejected)); err != nil {
-		panic(err)
-	}
 }

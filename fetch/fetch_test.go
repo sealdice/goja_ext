@@ -201,7 +201,9 @@ func waitBool(t *testing.T, loop *eventloop.EventLoop, name string) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("timeout waiting for %s", name)
+	t.Fatalf("timeout waiting for %s (stage=%q err=%q result=%q panics=%d)",
+		name, gstr(t, loop, "__stage"), gstr(t, loop, "__err"),
+		gstr(t, loop, "__result"), loop.GetPanicCount())
 }
 
 func gstr(t *testing.T, loop *eventloop.EventLoop, name string) string {
@@ -295,15 +297,18 @@ func TestFetch_StreamingBody(t *testing.T) {
 		Enable(vm)
 		_ = EnableFetch(vm, loop)
 		_, err := vm.RunString(`
-			globalThis.__done = false; globalThis.__err = "";
+			globalThis.__done = false; globalThis.__err = ""; globalThis.__stage = "started";
 			(async () => {
 				try {
 					const r = await fetch("` + srv.URL + `");
+					globalThis.__stage = "response";
 					const reader = r.body.getReader();
 					const out = [];
 					const dec = (u8) => { let s = ""; for (let i=0;i<u8.length;i++) s += String.fromCharCode(u8[i]); return s; };
 					while (true) {
+						globalThis.__stage = "reading-" + out.length;
 						const { done, value } = await reader.read();
+						globalThis.__stage = done ? "eof" : "read-" + out.length;
 						if (done) break;
 						out.push(dec(value));
 					}
@@ -447,16 +452,19 @@ func TestHeaders_API(t *testing.T) {
 			const r = [];
 			r.push(h.get("content-type"));
 			r.push(h.get("CONTENT-TYPE"));
-			h.append(" Content-Type ", "y");
+			h.append("Content-Type", "y");
 			r.push(h.get("content-type"));
 			r.push(String(h.has("X-A")));
 			r.push(String(h.has("nope")));
 			const fe = [];
 			h.forEach(function(v, k){ fe.push(k + "=" + v); });
 			r.push(fe.sort().join("|"));
-			r.push(h.keys().sort());
-			r.push(h.values().sort());
-			r.push(h.entries().sort());
+			r.push(Array.from(h.keys()).sort());
+			r.push(Array.from(h.values()).sort());
+			r.push(Array.from(h.entries()).sort());
+			let invalidName = false;
+			try { h.append(" bad", "value"); } catch { invalidName = true; }
+			r.push(String(invalidName));
 			h.delete("content-type");
 			r.push(String(h.has("content-type")));
 			globalThis.__res = JSON.stringify(r);
@@ -472,6 +480,7 @@ func TestHeaders_API(t *testing.T) {
 		[]string{"content-type", "x-a", "x-b"},
 		[]string{"1", "2", "x, y"},
 		[][]string{{"content-type", "x, y"}, {"x-a", "1"}, {"x-b", "2"}},
+		"true",
 		"false",
 	})
 	if got != want {
@@ -486,12 +495,12 @@ func TestHeaders_InitForms(t *testing.T) {
 		_, err := vm.RunString(`
 			const h1 = new Headers({"a":"1", "B":"2"});
 			const r = [];
-			r.push(h1.entries().sort());
+			r.push(Array.from(h1.entries()).sort());
 			const h2 = new Headers([["a","1"],["a","2"]]);
-			r.push(h2.entries());
+			r.push(Array.from(h2.entries()));
 			r.push(h2.get("a"));
 			const h3 = new Headers(h1);
-			r.push(h3.entries().sort());
+			r.push(Array.from(h3.entries()).sort());
 			h3.set("a","x");
 			r.push(h1.get("a"));
 			r.push(h3.get("a"));
@@ -537,9 +546,9 @@ func TestFormData_API(t *testing.T) {
 			const fe = [];
 			fd.forEach(function(v, k){ fe.push(k + "=" + v); });
 			r.push(fe.join(","));
-			r.push(fd.keys());
-			r.push(fd.values());
-			r.push(fd.entries());
+			r.push(Array.from(fd.keys()));
+			r.push(Array.from(fd.values()));
+			r.push(Array.from(fd.entries()));
 			globalThis.__res = JSON.stringify(r);
 		`)
 		if err != nil {
@@ -643,8 +652,8 @@ func TestResponse_JSONError(t *testing.T) {
 	})
 	waitBool(t, loop, "__done")
 	res := gstr(t, loop, "__result")
-	if !strings.HasPrefix(res, "rejected") || !strings.Contains(res, "invalid JSON") {
-		t.Fatalf("expected json() to reject with invalid JSON, got %q", res)
+	if !strings.HasPrefix(res, "rejected:SyntaxError:") {
+		t.Fatalf("expected json() to reject with SyntaxError, got %q", res)
 	}
 }
 
@@ -734,13 +743,11 @@ func TestRequest_Constructor(t *testing.T) {
 			r.push(r1.method);
 			const r2 = new Request("http://x", {method:"post"});
 			r.push(r2.method);
-			const r3 = new Request("http://x", {method:"PUT", headers:{"X-H":"v"}, body:"data", mode:"no-cors", credentials:"include", cache:"no-cache", redirect:"error"});
+			const signal = { aborted: false };
+			const r3 = new Request("http://x", {method:"PUT", headers:{"X-H":"v"}, body:"data", signal});
 			r.push(r3.method);
 			r.push(r3.headers.get("x-h"));
-			r.push(r3.mode);
-			r.push(r3.credentials);
-			r.push(r3.cache);
-			r.push(r3.redirect);
+			r.push(String(r3.signal === signal));
 			r.push(r3.url);
 			globalThis.__res = JSON.stringify(r);
 		`)
@@ -749,7 +756,7 @@ func TestRequest_Constructor(t *testing.T) {
 		}
 	})
 	got := gstr(t, loop, "__res")
-	want := mustJSON(t, []string{"GET", "POST", "PUT", "v", "no-cors", "include", "no-cache", "error", "http://x"})
+	want := mustJSON(t, []string{"GET", "POST", "PUT", "v", "true", "http://x/"})
 	if got != want {
 		t.Fatalf("request ctor: got %s want %s", got, want)
 	}
@@ -782,7 +789,7 @@ func TestFormData_MultipartBody(t *testing.T) {
 				try {
 					const fd = new FormData();
 					fd.append("field1", "value1");
-					fd.append("file1", "filecontent", "test.txt");
+					fd.append("file1", new (require("fetch").File)(["filecontent"], "test.txt", {type:"text/plain"}));
 					await fetch("` + srv.URL + `", {method:"POST", body: fd});
 				} catch(e) { globalThis.__err = String(e && e.stack || e); }
 				finally { globalThis.__done = true; }

@@ -1,7 +1,10 @@
 package fetch
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -34,6 +37,7 @@ func newClient(opts ...FetchOption) *resty.Client {
 		c = resty.NewWithClient(cfg.httpClient)
 	} else {
 		c = resty.New()
+		c.SetRedirectPolicy(defaultFetchRedirectPolicy(20))
 	}
 	if cfg.timeout > 0 {
 		c.SetTimeout(cfg.timeout)
@@ -45,6 +49,41 @@ func newClient(opts ...FetchOption) *resty.Client {
 		c.SetTransport(cfg.transport)
 	}
 	return c
+}
+
+func defaultFetchRedirectPolicy(limit int) resty.RedirectPolicy {
+	return resty.RedirectPolicyFunc(func(request *http.Request, via []*http.Request) error {
+		if len(via) >= limit {
+			return fmt.Errorf("stopped after %d redirects", limit)
+		}
+		if len(via) > 0 && !sameHTTPOrigin(via[len(via)-1].URL, request.URL) {
+			request.Header.Del("Authorization")
+		}
+		return nil
+	})
+}
+
+func sameHTTPOrigin(left, right *url.URL) bool {
+	if left == nil || right == nil ||
+		!strings.EqualFold(left.Scheme, right.Scheme) ||
+		!strings.EqualFold(left.Hostname(), right.Hostname()) {
+		return false
+	}
+	return effectivePort(left) == effectivePort(right)
+}
+
+func effectivePort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(value.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 // WithTimeout sets the default per-request timeout.

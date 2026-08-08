@@ -13,18 +13,7 @@ var exportsKey = runtimehost.NewKey("fetch.exports")
 // Exports returns the canonical Fetch API constructors for rt.
 func Exports(rt *goja.Runtime) *goja.Object {
 	value := runtimehost.GetOrCreate(rt, exportsKey, func() any {
-		exports := rt.NewObject()
-		for name, constructor := range map[string]any{
-			"Headers":  newHeadersCtor(rt),
-			"Request":  newRequestCtor(rt),
-			"Response": newResponseCtor(rt),
-			"FormData": newFormDataCtor(rt),
-		} {
-			if err := exports.Set(name, constructor); err != nil {
-				panic(err)
-			}
-		}
-		return exports
+		return initializeBareFetch(rt)
 	})
 	return value.(*goja.Object)
 }
@@ -39,7 +28,7 @@ func Enable(rt *goja.Runtime) {
 	}
 }
 
-// Require exports Headers, Request, Response and FormData as the "fetch" module.
+// Require exports the Fetch API constructors as the "fetch" module.
 func Require(rt *goja.Runtime, module *goja.Object) {
 	if err := module.Set("exports", Exports(rt)); err != nil {
 		panic(err)
