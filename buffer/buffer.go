@@ -14,12 +14,15 @@ import (
 	"github.com/sealdice/goja_ext/errors"
 	"github.com/sealdice/goja_ext/goutil"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/runtimehost"
 
 	"github.com/dop251/base64dec"
 	"golang.org/x/text/encoding/unicode"
 )
 
 const ModuleName = "buffer"
+
+var exportsKey = runtimehost.NewKey("buffer.exports")
 
 type Buffer struct {
 	r *goja.Runtime
@@ -1126,6 +1129,22 @@ func signExtend(value int64, numBytes int64) int64 {
 }
 
 func Require(runtime *goja.Runtime, module *goja.Object) {
+	if err := module.Set("exports", Exports(runtime)); err != nil {
+		panic(err)
+	}
+}
+
+// Exports returns the canonical buffer module exports for runtime.
+func Exports(runtime *goja.Runtime) *goja.Object {
+	value := runtimehost.GetOrCreate(runtime, exportsKey, func() any {
+		exports := runtime.NewObject()
+		initializeExports(runtime, exports)
+		return exports
+	})
+	return value.(*goja.Object)
+}
+
+func initializeExports(runtime *goja.Runtime, exports *goja.Object) {
 	b := &Buffer{r: runtime}
 	uint8Array := runtime.Get("Uint8Array")
 	if c, ok := goja.AssertConstructor(uint8Array); ok {
@@ -1269,7 +1288,6 @@ func Require(runtime *goja.Runtime, module *goja.Object) {
 	set(ctor, "alloc", b.alloc)
 	set(ctor, "concat", b.concat)
 
-	exports := module.Get("exports").(*goja.Object)
 	set(exports, "Buffer", ctor)
 }
 
