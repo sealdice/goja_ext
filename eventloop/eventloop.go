@@ -240,34 +240,42 @@ func WithDebugLog(enable bool) Option {
 type defaultLogger struct{}
 
 func (d *defaultLogger) Debug(args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Println(args...)
 }
 
 func (d *defaultLogger) Debugf(format string, args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Printf(format+"\n", args...)
 }
 
 func (d *defaultLogger) Info(args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Println(args...)
 }
 
 func (d *defaultLogger) Infof(format string, args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Printf(format+"\n", args...)
 }
 
 func (d *defaultLogger) Warn(args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Println(args...)
 }
 
 func (d *defaultLogger) Warnf(format string, args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Printf("WARN: "+format+"\n", args...)
 }
 
 func (d *defaultLogger) Error(args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Println(args...)
 }
 
 func (d *defaultLogger) Errorf(format string, args ...interface{}) {
+	//nolint:forbidigo // Default console output.
 	fmt.Printf("ERROR: "+format+"\n", args...)
 }
 

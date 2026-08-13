@@ -1,4 +1,4 @@
-package websocket
+package websocket //nolint:testpackage
 
 import (
 	"context"

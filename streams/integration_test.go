@@ -1,9 +1,10 @@
-package streams
+package streams_test
 
 import (
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/streams"
 )
 
 func TestGoReadableStreamSourceAndConsumer(t *testing.T) {
@@ -11,7 +12,7 @@ func TestGoReadableStreamSourceAndConsumer(t *testing.T) {
 	chunks := []string{"a", "b"}
 	index := 0
 
-	stream, err := NewReadableStream(rt, ReadableStreamSource{
+	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
 		Pull: func(controller *goja.Object) goja.Value {
 			if index == len(chunks) {
 				callMethod(t, controller, "close")
@@ -25,15 +26,15 @@ func TestGoReadableStreamSourceAndConsumer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !IsReadableStream(rt, stream) {
+	if !streams.IsReadableStream(rt, stream) {
 		t.Fatal("constructed object is not recognized as a ReadableStream")
 	}
-	if IsWritableStream(rt, stream) {
+	if streams.IsWritableStream(rt, stream) {
 		t.Fatal("readable stream was recognized as writable")
 	}
 
 	var consumed string
-	promise, err := ConsumeReadableStream(rt, stream, func(chunk goja.Value) goja.Value {
+	promise, err := streams.ConsumeReadableStream(rt, stream, func(chunk goja.Value) goja.Value {
 		consumed += chunk.String()
 		return goja.Undefined()
 	})
@@ -53,7 +54,7 @@ func TestGoWritableStreamSink(t *testing.T) {
 	var written string
 	closed := false
 
-	stream, err := NewWritableStream(rt, WritableStreamSink{
+	stream, err := streams.NewWritableStream(rt, streams.WritableStreamSink{
 		Write: func(chunk goja.Value, _ *goja.Object) goja.Value {
 			written += chunk.String()
 			return goja.Undefined()
@@ -66,11 +67,11 @@ func TestGoWritableStreamSink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !IsWritableStream(rt, stream) {
+	if !streams.IsWritableStream(rt, stream) {
 		t.Fatal("constructed object is not recognized as a WritableStream")
 	}
 
-	if err := rt.Set("__stream", stream); err != nil {
+	if err = rt.Set("__stream", stream); err != nil {
 		t.Fatal(err)
 	}
 	value, err := rt.RunString(`

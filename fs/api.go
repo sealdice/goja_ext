@@ -561,9 +561,9 @@ func (m *moduleInstance) readDirEntries(name string) ([]os.FileInfo, error) {
 }
 
 func (m *moduleInstance) withRuntime(rt *goja.Runtime) *moduleInstance {
-	copy := *m
-	copy.rt = rt
-	return &copy
+	shallow := *m
+	shallow.rt = rt
+	return &shallow
 }
 
 func (m *moduleInstance) promiseCall(

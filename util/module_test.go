@@ -1,4 +1,4 @@
-package util
+package util_test
 
 import (
 	"bytes"
@@ -7,11 +7,12 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	utilpkg "github.com/sealdice/goja_ext/util"
 )
 
 func TestUtil_Format(t *testing.T) {
 	vm := goja.New()
-	util := New(vm)
+	util := utilpkg.New(vm)
 
 	var b bytes.Buffer
 	util.Format(&b, "Test: %% %д %s %d, %j", vm.ToValue("string"), vm.ToValue(42), vm.NewObject())
@@ -23,7 +24,7 @@ func TestUtil_Format(t *testing.T) {
 
 func TestUtil_Format_NoArgs(t *testing.T) {
 	vm := goja.New()
-	util := New(vm)
+	util := utilpkg.New(vm)
 
 	var b bytes.Buffer
 	util.Format(&b, "Test: %s %d, %j")
@@ -35,7 +36,7 @@ func TestUtil_Format_NoArgs(t *testing.T) {
 
 func TestUtil_Format_LessArgs(t *testing.T) {
 	vm := goja.New()
-	util := New(vm)
+	util := utilpkg.New(vm)
 
 	var b bytes.Buffer
 	util.Format(&b, "Test: %s %d, %j", vm.ToValue("string"), vm.ToValue(42))
@@ -47,7 +48,7 @@ func TestUtil_Format_LessArgs(t *testing.T) {
 
 func TestUtil_Format_MoreArgs(t *testing.T) {
 	vm := goja.New()
-	util := New(vm)
+	util := utilpkg.New(vm)
 
 	var b bytes.Buffer
 	util.Format(&b, "Test: %s %d, %j", vm.ToValue("string"), vm.ToValue(42), vm.NewObject(), vm.ToValue(42.42))
@@ -61,7 +62,7 @@ func TestJSNoArgs(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
 
-	if util, ok := require.Require(vm, ModuleName).(*goja.Object); ok {
+	if util, ok := require.Require(vm, utilpkg.ModuleName).(*goja.Object); ok {
 		if format, ok := goja.AssertFunction(util.Get("format")); ok {
 			res, err := format(util)
 			if err != nil {
@@ -77,7 +78,7 @@ func TestJSNoArgs(t *testing.T) {
 func TestUtil_Inspect(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, ok := goja.AssertFunction(utilExports.Get("inspect"))
 	if !ok {
 		t.Fatal("util.inspect not found")
@@ -115,7 +116,7 @@ func TestUtil_Inspect(t *testing.T) {
 func TestUtil_Inspect_Circular(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
 
 	_, err := vm.RunString(`const o = {}; o.self = o;`)
@@ -135,7 +136,7 @@ func TestUtil_Inspect_Circular(t *testing.T) {
 func TestUtil_Inspect_UndefinedOrNullOptions(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
 
 	for _, opts := range []string{"undefined", "null"} {
@@ -163,7 +164,7 @@ func TestUtil_Inspect_UndefinedOrNullOptions(t *testing.T) {
 func TestInspect_DepthOption(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
 
 	cases := []struct {
@@ -195,7 +196,7 @@ func TestInspect_DepthOption(t *testing.T) {
 func TestInspect_Functions(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
 
 	cases := []struct {
@@ -226,7 +227,7 @@ func TestInspect_Functions(t *testing.T) {
 func TestInspect_NumbersAndEmpty(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	utilExports := require.Require(vm, ModuleName).(*goja.Object)
+	utilExports := require.Require(vm, utilpkg.ModuleName).(*goja.Object)
 	inspect, _ := goja.AssertFunction(utilExports.Get("inspect"))
 
 	cases := []struct {

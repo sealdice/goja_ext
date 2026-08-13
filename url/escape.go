@@ -54,7 +54,7 @@ func unhex(c byte) byte {
 
 func escape(s string, table *[128]byte, spaceToPlus bool) string {
 	spaceCount, hexCount := 0, 0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c > 127 || table[c] == 0 {
 			if c == ' ' && spaceToPlus {
@@ -74,7 +74,7 @@ func escape(s string, table *[128]byte, spaceToPlus bool) string {
 
 	sb.Grow(len(s) + 2*hexCount)
 
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		switch c := s[i]; {
 		case c == ' ' && spaceToPlus:
 			sb.WriteByte('+')

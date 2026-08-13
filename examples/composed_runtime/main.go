@@ -39,6 +39,6 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(value.String())
+		fmt.Println(value.String()) //nolint:forbidigo // Example output.
 	})
 }

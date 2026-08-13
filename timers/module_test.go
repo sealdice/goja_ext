@@ -1,4 +1,4 @@
-package timers
+package timers_test
 
 import (
 	"strings"

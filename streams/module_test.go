@@ -1,4 +1,4 @@
-package streams
+package streams_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/streams"
 )
 
 func runStreamsScript(t *testing.T, script string) string {
@@ -30,7 +31,7 @@ func runStreamsScript(t *testing.T, script string) string {
 				close(done)
 			}, 10*time.Millisecond)
 		}()
-		Enable(vm)
+		streams.Enable(vm)
 		_, runErr = vm.RunString(script)
 	})
 
@@ -59,7 +60,9 @@ func TestModuleExportsAndGlobals(t *testing.T) {
 			"ReadableStreamBYOBRequest",
 			"ReadableStreamDefaultController",
 			"ReadableStreamDefaultReader",
+			"TextDecoder",
 			"TextDecoderStream",
+			"TextEncoder",
 			"TextEncoderStream",
 			"TransformStream",
 			"TransformStreamDefaultController",
@@ -76,7 +79,7 @@ func TestModuleExportsAndGlobals(t *testing.T) {
 		}
 		globalThis.__result = actual;
 	`)
-	if result != "ByteLengthQueuingStrategy,CountQueuingStrategy,ReadableByteStreamController,ReadableStream,ReadableStreamBYOBReader,ReadableStreamBYOBRequest,ReadableStreamDefaultController,ReadableStreamDefaultReader,TextDecoderStream,TextEncoderStream,TransformStream,TransformStreamDefaultController,WritableStream,WritableStreamDefaultController,WritableStreamDefaultWriter" {
+	if result != "ByteLengthQueuingStrategy,CountQueuingStrategy,ReadableByteStreamController,ReadableStream,ReadableStreamBYOBReader,ReadableStreamBYOBRequest,ReadableStreamDefaultController,ReadableStreamDefaultReader,TextDecoder,TextDecoderStream,TextEncoder,TextEncoderStream,TransformStream,TransformStreamDefaultController,WritableStream,WritableStreamDefaultController,WritableStreamDefaultWriter" {
 		t.Fatalf("unexpected exports: %s", result)
 	}
 }
@@ -298,6 +301,70 @@ func TestTextEncoderAndDecoderStreams(t *testing.T) {
 	}
 }
 
+func TestTextEncoderAndDecoderGlobalsAndExports(t *testing.T) {
+	result := runStreamsScript(t, `
+		const web = require("streams");
+		const encoded = new TextEncoder().encode("A€");
+		globalThis.__result = JSON.stringify([
+			TextEncoder === web.TextEncoder,
+			TextDecoder === web.TextDecoder,
+			new TextEncoder().encoding,
+			new TextDecoder().encoding,
+			Array.from(encoded),
+			new TextDecoder().decode(encoded),
+		]);
+	`)
+	want := `[true,true,"utf-8","utf-8",[65,226,130,172],"A€"]`
+	if result != want {
+		t.Fatalf("unexpected text codec exports: got %s want %s", result, want)
+	}
+}
+
+func TestTextEncoderEncodeIntoDoesNotSplitCodePoint(t *testing.T) {
+	result := runStreamsScript(t, `
+		const encoder = new TextEncoder();
+		const short = new Uint8Array(3);
+		const first = encoder.encodeInto("€A", short);
+		const full = new Uint8Array(4);
+		const second = encoder.encodeInto("€A", full);
+		globalThis.__result = JSON.stringify([
+			first, Array.from(short), second, Array.from(full)
+		]);
+	`)
+	want := `[{"read":1,"written":3},[226,130,172],{"read":2,"written":4},[226,130,172,65]]`
+	if result != want {
+		t.Fatalf("unexpected encodeInto result: got %s want %s", result, want)
+	}
+}
+
+func TestTextDecoderStreamingBOMAndErrors(t *testing.T) {
+	result := runStreamsScript(t, `
+		const decoder = new TextDecoder();
+		const split = decoder.decode(new Uint8Array([0xef, 0xbb]), { stream: true }) +
+			decoder.decode(new Uint8Array([0xbf, 0xe2]), { stream: true }) +
+			decoder.decode(new Uint8Array([0x82, 0xac]));
+		const kept = new TextDecoder("utf8", { ignoreBOM: true })
+			.decode(new Uint8Array([0xef, 0xbb, 0xbf, 65]));
+		const afterEmpty = new TextDecoder();
+		afterEmpty.decode(new Uint8Array(0), { stream: true });
+		const emptyThenBOM = afterEmpty.decode(new Uint8Array([0xef, 0xbb, 0xbf, 66]));
+		let fatal = "no-throw";
+		try {
+			new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array([0xff]));
+		} catch (error) {
+			fatal = error instanceof TypeError ? "TypeError" : String(error);
+		}
+		let unsupported = "no-throw";
+		try { new TextDecoder("utf-16"); }
+		catch (error) { unsupported = error instanceof RangeError ? "RangeError" : String(error); }
+		globalThis.__result = JSON.stringify([split, kept, emptyThenBOM, fatal, unsupported]);
+	`)
+	want := `["€","` + string(rune(0xfeff)) + `A","B","TypeError","RangeError"]`
+	if result != want {
+		t.Fatalf("unexpected decoder result: got %s want %s", result, want)
+	}
+}
+
 func TestTextEncoderStreamEmitsNativeUint8Array(t *testing.T) {
 	result := runStreamsScript(t, `
 		const stream = new TextEncoderStream();
@@ -360,7 +427,8 @@ func TestTextDecoderStreamStripsSplitBOM(t *testing.T) {
 		const reader = stream.readable.getReader();
 		const writer = stream.writable.getWriter();
 		const reading = collect(reader, []);
-		writer.write(new Uint8Array([0xef]))
+		writer.write(new Uint8Array(0))
+			.then(function () { return writer.write(new Uint8Array([0xef])); })
 			.then(function () { return writer.write(new Uint8Array([0xbb, 0xbf, 65])); })
 			.then(function () { return writer.close(); });
 		reading.then(function (chunks) {

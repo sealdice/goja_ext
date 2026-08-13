@@ -1,4 +1,4 @@
-package fs
+package fs_test
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/sealdice/goja_ext/fs"
 	"github.com/sealdice/goja_ext/require"
 	"github.com/spf13/afero"
 )
@@ -17,12 +18,12 @@ func TestEnableAndRequireShareCanonicalCore(t *testing.T) {
 	rt := goja.New()
 	registry := require.NewRegistry()
 	backend := afero.NewMemMapFs()
-	registry.RegisterNativeModule("fs", RequireWithOptions(
-		WithFS(backend),
-		WithCwd("/workspace"),
+	registry.RegisterNativeModule("fs", fs.RequireWithOptions(
+		fs.WithFS(backend),
+		fs.WithCwd("/workspace"),
 	))
 	registry.Enable(rt)
-	if err := Enable(rt, WithFS(backend), WithCwd("/workspace")); err != nil {
+	if err := fs.Enable(rt, fs.WithFS(backend), fs.WithCwd("/workspace")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -43,7 +44,7 @@ func TestEnableAndRequireShareCanonicalCore(t *testing.T) {
 
 func TestEnableInstallsOnlyDenoFacade(t *testing.T) {
 	rt := goja.New()
-	if err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/workspace")); err != nil {
+	if err := fs.Enable(rt, fs.WithFS(afero.NewMemMapFs()), fs.WithCwd("/workspace")); err != nil {
 		t.Fatal(err)
 	}
 	value, err := rt.RunString(`
@@ -65,10 +66,10 @@ func TestEnableInstallsOnlyDenoFacade(t *testing.T) {
 func TestWithStreamsFalseOmitsEveryStreamSurface(t *testing.T) {
 	rt := goja.New()
 	registry := require.NewRegistry()
-	registry.RegisterNativeModule("fs", RequireWithOptions(
-		WithFS(afero.NewMemMapFs()),
-		WithCwd("/workspace"),
-		WithStreams(false),
+	registry.RegisterNativeModule("fs", fs.RequireWithOptions(
+		fs.WithFS(afero.NewMemMapFs()),
+		fs.WithCwd("/workspace"),
+		fs.WithStreams(false),
 	))
 	registry.Enable(rt)
 	value, err := rt.RunString(`
@@ -95,13 +96,13 @@ func TestWithStreamsFalseOmitsEveryStreamSurface(t *testing.T) {
 func TestRuntimeCoreRejectsConflictingBackend(t *testing.T) {
 	rt := goja.New()
 	first := afero.NewMemMapFs()
-	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+	if err := fs.Enable(rt, fs.WithFS(first), fs.WithCwd("/")); err != nil {
 		t.Fatal(err)
 	}
-	if err := Enable(rt, WithFS(first), WithCwd("/")); err != nil {
+	if err := fs.Enable(rt, fs.WithFS(first), fs.WithCwd("/")); err != nil {
 		t.Fatalf("equivalent configuration was rejected: %v", err)
 	}
-	err := Enable(rt, WithFS(afero.NewMemMapFs()), WithCwd("/"))
+	err := fs.Enable(rt, fs.WithFS(afero.NewMemMapFs()), fs.WithCwd("/"))
 	if err == nil || !strings.Contains(err.Error(), "backend") {
 		t.Fatalf("backend conflict error = %v", err)
 	}
@@ -110,22 +111,22 @@ func TestRuntimeCoreRejectsConflictingBackend(t *testing.T) {
 func TestRuntimeCoreRejectsConflictingCwdAndChunkSize(t *testing.T) {
 	rt := goja.New()
 	backend := afero.NewMemMapFs()
-	if err := Enable(rt,
-		WithFS(backend),
-		WithCwd("/first"),
-		WithStreamChunkSize(1024),
+	if err := fs.Enable(rt,
+		fs.WithFS(backend),
+		fs.WithCwd("/first"),
+		fs.WithStreamChunkSize(1024),
 	); err != nil {
 		t.Fatal(err)
 	}
-	for name, options := range map[string][]Option{
+	for name, options := range map[string][]fs.Option{
 		"cwd": {
-			WithFS(backend), WithCwd("/second"), WithStreamChunkSize(1024),
+			fs.WithFS(backend), fs.WithCwd("/second"), fs.WithStreamChunkSize(1024),
 		},
 		"chunk size": {
-			WithFS(backend), WithCwd("/first"), WithStreamChunkSize(2048),
+			fs.WithFS(backend), fs.WithCwd("/first"), fs.WithStreamChunkSize(2048),
 		},
 	} {
-		err := Enable(rt, options...)
+		err := fs.Enable(rt, options...)
 		if err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s conflict error = %v", name, err)
 		}
@@ -135,7 +136,7 @@ func TestRuntimeCoreRejectsConflictingCwdAndChunkSize(t *testing.T) {
 func TestEnableWithLoopRejectsForeignRuntime(t *testing.T) {
 	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
 	defer loop.Stop()
-	err := EnableWithLoop(goja.New(), loop, WithFS(afero.NewMemMapFs()))
+	err := fs.EnableWithLoop(goja.New(), loop, fs.WithFS(afero.NewMemMapFs()))
 	if err == nil || !strings.Contains(err.Error(), "different runtime") {
 		t.Fatalf("foreign loop error = %v", err)
 	}
@@ -144,7 +145,7 @@ func TestEnableWithLoopRejectsForeignRuntime(t *testing.T) {
 func TestRequireWithLoopRejectsForeignRuntime(t *testing.T) {
 	loop := eventloop.NewEventLoop(eventloop.EnableConsole(false))
 	defer loop.Stop()
-	loader := RequireWithLoop(loop, WithFS(afero.NewMemMapFs()))
+	loader := fs.RequireWithLoop(loop, fs.WithFS(afero.NewMemMapFs()))
 	rt := goja.New()
 	module := rt.NewObject()
 	_ = module.Set("exports", rt.NewObject())
@@ -162,14 +163,14 @@ func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {
 
 	registry := require.NewRegistry()
 	backend := afero.NewMemMapFs()
-	loader := RequireWithOptions(
-		WithFS(backend),
-		WithCwd(cwd),
-		WithStreams(true),
+	loader := fs.RequireWithOptions(
+		fs.WithFS(backend),
+		fs.WithCwd(cwd),
+		fs.WithStreams(true),
 	)
-	promiseLoader := RequirePromisesWithOptions(
-		WithFS(backend),
-		WithCwd(cwd),
+	promiseLoader := fs.RequirePromisesWithOptions(
+		fs.WithFS(backend),
+		fs.WithCwd(cwd),
 	)
 	registry.RegisterNativeModule("fs", loader)
 	registry.RegisterNativeModule("fs/promises", promiseLoader)
@@ -278,15 +279,15 @@ func TestDenoRequireWithLoopRunsAsyncOperationsOffLoop(t *testing.T) {
 		eventloop.EnableConsole(false),
 		eventloop.WithRegistry(registry),
 	)
-	registry.RegisterNativeModule("fs", RequireWithLoop(
+	registry.RegisterNativeModule("fs", fs.RequireWithLoop(
 		loop,
-		WithFS(backend),
-		WithCwd("/workspace"),
+		fs.WithFS(backend),
+		fs.WithCwd("/workspace"),
 	))
-	registry.RegisterNativeModule("fs/promises", RequirePromisesWithLoop(
+	registry.RegisterNativeModule("fs/promises", fs.RequirePromisesWithLoop(
 		loop,
-		WithFS(backend),
-		WithCwd("/workspace"),
+		fs.WithFS(backend),
+		fs.WithCwd("/workspace"),
 	))
 
 	go loop.StartInForeground()
@@ -335,9 +336,9 @@ func TestDenoLoaderDoesNotShareCwdAcrossRuntimes(t *testing.T) {
 	if err := backend.MkdirAll("/workspace/a", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	loader := RequireWithOptions(
-		WithFS(backend),
-		WithCwd("/workspace"),
+	loader := fs.RequireWithOptions(
+		fs.WithFS(backend),
+		fs.WithCwd("/workspace"),
 	)
 
 	registry1 := require.NewRegistry()
@@ -398,10 +399,10 @@ func TestDenoLoaderDoesNotShareCwdAcrossRuntimes(t *testing.T) {
 
 func TestDenoRegisterWithOptionsInstallsNodeAliases(t *testing.T) {
 	registry := require.NewRegistry()
-	RegisterWithOptions(
+	fs.RegisterWithOptions(
 		registry,
-		WithFS(afero.NewMemMapFs()),
-		WithCwd("/workspace"),
+		fs.WithFS(afero.NewMemMapFs()),
+		fs.WithCwd("/workspace"),
 	)
 	loop := eventloop.NewEventLoop(
 		eventloop.EnableConsole(false),
@@ -444,11 +445,11 @@ func TestDenoRegisterWithLoopInstallsAsyncNodeAliases(t *testing.T) {
 		eventloop.EnableConsole(false),
 		eventloop.WithRegistry(registry),
 	)
-	RegisterWithLoop(
+	fs.RegisterWithLoop(
 		registry,
 		loop,
-		WithFS(afero.NewMemMapFs()),
-		WithCwd("/workspace"),
+		fs.WithFS(afero.NewMemMapFs()),
+		fs.WithCwd("/workspace"),
 	)
 	go loop.StartInForeground()
 	t.Cleanup(func() { loop.Stop() })

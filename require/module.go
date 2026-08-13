@@ -39,12 +39,12 @@ var (
 	ErrModuleFileDoesNotExist = errors.New("module file does not exist")
 
 	// Deprecated compatibility aliases. Use the Err-prefixed names above.
-	InvalidModuleError = ErrInvalidModule //nolint:staticcheck // Public compatibility alias.
-	//nolint:staticcheck // Public compatibility alias.
+	InvalidModuleError = ErrInvalidModule //nolint:staticcheck,errname // Public compatibility alias.
+	//nolint:staticcheck,errname // Public compatibility alias.
 	IllegalModuleNameError = ErrIllegalModuleName
-	//nolint:staticcheck // Public compatibility alias.
+	//nolint:staticcheck,errname // Public compatibility alias.
 	NoSuchBuiltInModuleError = ErrNoSuchBuiltInModule
-	//nolint:staticcheck // Public compatibility alias.
+	//nolint:staticcheck,errname // Public compatibility alias.
 	ModuleFileDoesNotExistError = ErrModuleFileDoesNotExist
 )
 
@@ -231,7 +231,8 @@ func (r *Registry) getCompiledSource(p string) (*js.Program, error) {
 func (r *RequireModule) require(call js.FunctionCall) js.Value {
 	ret, err := r.Require(call.Argument(0).String())
 	if err != nil {
-		if _, ok := err.(*js.Exception); !ok {
+		exception := &js.Exception{}
+		if !errors.As(err, &exception) {
 			panic(r.runtime.NewGoError(err))
 		}
 		panic(err)
@@ -247,10 +248,10 @@ func filepathClean(p string) string {
 func (r *RequireModule) Require(p string) (ret js.Value, err error) {
 	module, err := r.resolve(p)
 	if err != nil {
-		return
+		return ret, err
 	}
 	ret = module.Get("exports")
-	return
+	return ret, err
 }
 
 func Require(runtime *js.Runtime, name string) js.Value {

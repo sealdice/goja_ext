@@ -186,7 +186,7 @@ func mustCompileTextStreams() *goja.Program {
 	return program
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 	require.RegisterCoreModule(StreamWebModule, Require)
 }

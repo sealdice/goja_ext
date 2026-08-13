@@ -1,4 +1,4 @@
-package structuredclone
+package structuredclone_test
 
 import (
 	"strings"
@@ -6,11 +6,12 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/structuredclone"
 )
 
 func TestStructuredClone_PrimitivesAndContainers(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const original = { n: 1, s: "x", a: [1, 2, { y: true }] };
 		const copy = structuredClone(original);
@@ -29,7 +30,7 @@ func TestStructuredClone_PrimitivesAndContainers(t *testing.T) {
 
 func TestStructuredClone_Circular(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	_, err := rt.RunString(`
 		const o = { name: "root" };
 		o.self = o;
@@ -46,7 +47,7 @@ func TestStructuredClone_Circular(t *testing.T) {
 
 func TestStructuredClone_PrimitivesAndDate(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const d = new Date(0);
 		const d2 = structuredClone(d);
@@ -62,7 +63,7 @@ func TestStructuredClone_PrimitivesAndDate(t *testing.T) {
 
 func TestStructuredClone_Map(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const m = new Map([["a", 1], ["b", { x: 2 }]]);
 		const c = structuredClone(m);
@@ -79,7 +80,7 @@ func TestStructuredClone_Map(t *testing.T) {
 
 func TestStructuredClone_Set(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const s = new Set([1, 2, 3]);
 		const c = structuredClone(s);
@@ -96,7 +97,7 @@ func TestStructuredClone_Set(t *testing.T) {
 
 func TestStructuredClone_DateIndependent(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const d = new Date(123456789000);
 		const c = structuredClone(d);
@@ -112,7 +113,7 @@ func TestStructuredClone_DateIndependent(t *testing.T) {
 
 func TestStructuredClone_CircularInsideMap(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	_, err := rt.RunString(`
 		const m = new Map();
 		const inner = { name: "inner" };
@@ -133,7 +134,7 @@ func TestStructuredClone_CircularInsideMap(t *testing.T) {
 
 func TestStructuredClone_NoArgThrows(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	_, err := rt.RunString("structuredClone()")
 	if err == nil {
 		t.Fatal("expected TypeError for missing argument")
@@ -145,7 +146,7 @@ func TestStructuredClone_NoArgThrows(t *testing.T) {
 
 func TestStructuredClone_UndefinedAndNull(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`JSON.stringify([typeof structuredClone(undefined), structuredClone(null)])`)
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +159,7 @@ func TestStructuredClone_UndefinedAndNull(t *testing.T) {
 
 func TestStructuredClone_CircularSet(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	_, err := rt.RunString(`
 		const s = new Set();
 		const inner = { n: 1 };
@@ -182,7 +183,7 @@ func TestStructuredClone_CircularSet(t *testing.T) {
 
 func TestStructuredClone_InvalidDate(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const d = new Date(NaN);
 		const c = structuredClone(d);
@@ -198,7 +199,7 @@ func TestStructuredClone_InvalidDate(t *testing.T) {
 
 func TestStructuredClone_RegExp(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const original = /ab+/gi;
 		original.lastIndex = 4;
@@ -215,7 +216,7 @@ func TestStructuredClone_RegExp(t *testing.T) {
 
 func TestStructuredClone_ArrayBufferAndViews(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const buffer = new ArrayBuffer(6);
 		const bytes = new Uint8Array(buffer);
@@ -249,7 +250,7 @@ func TestStructuredClone_ArrayBufferAndViews(t *testing.T) {
 
 func TestStructuredClone_UnsupportedValuesThrowDataCloneError(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	structuredclone.Enable(rt)
 	v, err := rt.RunString(`
 		const values = [
 			() => {},

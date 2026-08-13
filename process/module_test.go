@@ -1,4 +1,4 @@
-package process
+package process_test
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/process"
 	"github.com/sealdice/goja_ext/require"
 )
 
@@ -15,7 +16,7 @@ func TestProcessEnvStructure(t *testing.T) {
 	vm := goja.New()
 
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	process.Enable(vm)
 
 	if c := vm.Get("process"); c == nil {
 		t.Fatal("process not found")
@@ -32,7 +33,7 @@ func TestProcessEnvValuesArtificial(t *testing.T) {
 	vm := goja.New()
 
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	process.Enable(vm)
 
 	jsRes, err := vm.RunString("process.env['GOJA_IS_AWESOME']")
 
@@ -49,7 +50,7 @@ func TestProcessEnvValuesBrackets(t *testing.T) {
 	vm := goja.New()
 
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	process.Enable(vm)
 
 	for _, e := range os.Environ() {
 		envKeyValue := strings.SplitN(e, "=", 2)
@@ -75,8 +76,8 @@ func TestProcessCwdIsRuntimeLocal(t *testing.T) {
 	target := t.TempDir()
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	Enable(vm)
-	if err := vm.Set("target", target); err != nil {
+	process.Enable(vm)
+	if err = vm.Set("target", target); err != nil {
 		t.Fatal(err)
 	}
 	value, err := vm.RunString(`

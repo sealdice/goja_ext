@@ -59,12 +59,12 @@ func main() {
 			setup <- err
 			return
 		}
-		if err := rt.Set("__url", "wss"+strings.TrimPrefix(server.URL, "https")); err != nil {
-			setup <- err
+		if setErr := rt.Set("__url", "wss"+strings.TrimPrefix(server.URL, "https")); setErr != nil {
+			setup <- setErr
 			return
 		}
-		if err := rt.Set("__finish", func(value string) { result <- value }); err != nil {
-			setup <- err
+		if setErr := rt.Set("__finish", func(value string) { result <- value }); setErr != nil {
+			setup <- setErr
 			return
 		}
 		_, err = rt.RunString(`
@@ -88,7 +88,7 @@ func main() {
 		if value != "verified websocket" {
 			panic("unexpected websocket result: " + value)
 		}
-		fmt.Println(value)
+		fmt.Println(value) //nolint:forbidigo // Example output.
 	case <-time.After(3 * time.Second):
 		panic("timed out waiting for websocket message")
 	}

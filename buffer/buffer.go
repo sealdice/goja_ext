@@ -162,7 +162,7 @@ func (b *Buffer) ctor(call goja.ConstructorCall) (res *goja.Object) {
 }
 
 type StringCodec interface {
-	DecodeAppend(string, []byte) []byte
+	DecodeAppend(prefix string, buf []byte) []byte
 	Encode([]byte) string
 	Decode(s string) []byte
 }
@@ -248,7 +248,7 @@ func expandSlice(b []byte, l int) (dst, res []byte) {
 		dst = b[len(b) : len(b)+l]
 		res = b[:len(b)+l]
 	}
-	return
+	return dst, res
 }
 
 func Base64DecodeAppend(dst []byte, src string) ([]byte, error) {
@@ -328,7 +328,7 @@ func (b *Buffer) _from(args ...goja.Value) *goja.Object {
 			if v := o.Get("length"); v != nil {
 				length := int(v.ToInteger())
 				a := make([]byte, length)
-				for i := 0; i < length; i++ {
+				for i := range length {
 					item := o.Get(strconv.Itoa(i))
 					if item != nil {
 						a[i] = byte(item.ToInteger())
@@ -358,7 +358,7 @@ func (b *Buffer) getStringCodec(enc goja.Value) (codec StringCodec) {
 	} else {
 		codec = utf8Codec
 	}
-	return
+	return codec
 }
 
 func (b *Buffer) fill(buf []byte, fill string, enc goja.Value) []byte {
@@ -615,7 +615,7 @@ func (b *Buffer) readIntBE(call goja.FunctionCall) goja.Value {
 	offset, byteLength := b.getVariableLengthReadArguments(call, bb)
 
 	var value int64
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		value = (value << 8) | int64(bb[offset+i])
 	}
 
@@ -690,7 +690,7 @@ func (b *Buffer) readUIntBE(call goja.FunctionCall) goja.Value {
 	offset, byteLength := b.getVariableLengthReadArguments(call, bb)
 
 	var value uint64
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		value = (value << 8) | uint64(bb[offset+i])
 	}
 
@@ -909,7 +909,7 @@ func (b *Buffer) writeIntBE(call goja.FunctionCall) goja.Value {
 	b.ensureWithinIntRange(byteLength, value)
 
 	// Write bytes in big-endian order (most significant byte first)
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		shift := uint(8 * (byteLength - 1 - i))
 		bb[offset+i] = byte(value >> shift)
 	}
@@ -926,7 +926,7 @@ func (b *Buffer) writeIntLE(call goja.FunctionCall) goja.Value {
 	b.ensureWithinIntRange(byteLength, value)
 
 	// Write bytes in little-endian order
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		shift := uint(8 * i)
 		bb[offset+i] = byte(value >> shift)
 	}
@@ -1010,7 +1010,7 @@ func (b *Buffer) writeUIntBE(call goja.FunctionCall) goja.Value {
 	b.ensureWithinUIntRange(byteLength, value)
 
 	// Write the bytes in big-endian order (most significant byte first)
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		shift := (byteLength - 1 - i) * 8
 		bb[offset+i] = byte(value >> shift)
 	}
@@ -1027,7 +1027,7 @@ func (b *Buffer) writeUIntLE(call goja.FunctionCall) goja.Value {
 	b.ensureWithinUIntRange(byteLength, value)
 
 	// Write the bytes in little-endian order
-	for i := int64(0); i < byteLength; i++ {
+	for i := range byteLength {
 		shift := uint(8 * i)
 		bb[offset+i] = byte(value >> shift)
 	}
@@ -1291,6 +1291,6 @@ func initializeExports(runtime *goja.Runtime, exports *goja.Object) {
 	set(exports, "Buffer", ctor)
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

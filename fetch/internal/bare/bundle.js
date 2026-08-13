@@ -724,7 +724,7 @@ Content-Type: ${value.type || "application/octet-stream"}\r
 // node_modules/bare-fetch/lib/body.js
 var require_body = __commonJS({
   "node_modules/bare-fetch/lib/body.js"(exports2, module2) {
-    var { ReadableStream, isReadableStream, isReadableStreamDisturbed } = require("goja:stream/web");
+    var { ReadableStream, isReadableStream: isReadableStream2, isReadableStreamDisturbed } = require("goja:stream/web");
     var { isURLSearchParams } = require("goja:url");
     var { FormData: FormData2, File: File2, isFormData, isBlob } = require_bare_form_data();
     var Headers2 = require_headers();
@@ -732,7 +732,7 @@ var require_body = __commonJS({
     var empty = Buffer.from(new ArrayBuffer(0));
     module2.exports = exports2 = class Body2 {
       constructor(body = null, type = null) {
-        if (isReadableStream(body)) {
+        if (isReadableStream2(body)) {
           if (isReadableStreamDisturbed(body) || body.locked) {
             throw errors.BODY_UNUSABLE("Body has already been consumed");
           }
@@ -1105,11 +1105,38 @@ var require_response = __commonJS({
 // fetch/internal/bare/facade.js
 var Headers = require_headers();
 var Body = require_body();
-var Request = require_request();
+var BareRequest = require_request();
 var Response = require_response();
 var FetchError = require_errors();
 var formData = require_bare_form_data();
+var { isReadableStream } = require("goja:stream/web");
 var { FormData, Blob, File } = formData;
+var requestBodyKinds = /* @__PURE__ */ new WeakMap();
+var Request = class _Request extends BareRequest {
+  constructor(input, init = {}) {
+    if (init.duplex !== void 0 && init.duplex !== "half") {
+      throw new TypeError("Request duplex must be 'half'");
+    }
+    let bodyKind = null;
+    if (init.body !== void 0) {
+      bodyKind = isReadableStream(init.body) ? "stream" : "static";
+    } else if (input && requestBodyKinds.has(input)) {
+      bodyKind = requestBodyKinds.get(input);
+    } else if (input && typeof input === "object") {
+      bodyKind = isReadableStream(input.body) ? "stream" : "static";
+    }
+    super(input, init);
+    requestBodyKinds.set(this, bodyKind || "static");
+  }
+  clone() {
+    if (Body.isUnusable(this)) {
+      throw FetchError.BODY_UNUSABLE("Body has already been consumed");
+    }
+    const cloned = new _Request(this, { body: Body.clone(this) });
+    requestBodyKinds.set(cloned, requestBodyKinds.get(this));
+    return cloned;
+  }
+};
 var cloneResponse = Response.prototype.clone;
 Response.prototype.clone = function clone() {
   const cloned = cloneResponse.call(this);
@@ -1151,8 +1178,10 @@ function createFetch(host) {
     function send(request2) {
       return __async(this, null, function* () {
         const signal = request2.signal;
+        validateSignal(signal);
         if (signal && signal.aborted) throw signal.reason;
-        const body = yield readBody(request2, signal);
+        const bodyStream = requestBodyKinds.get(request2) === "stream" ? request2.body : null;
+        const body = bodyStream === null ? yield readBody(request2, signal) : null;
         if (signal && signal.aborted) throw signal.reason;
         if (!request2.headers.has("user-agent")) {
           request2.headers.set("user-agent", "goja_nodejs-fetch/1.0");
@@ -1165,6 +1194,7 @@ function createFetch(host) {
             method: request2.method,
             headers: Array.from(request2.headers),
             body,
+            bodyStream,
             signal
           });
         } catch (err) {
@@ -1182,6 +1212,15 @@ function createFetch(host) {
       });
     }
   };
+}
+function validateSignal(signal) {
+  if (signal === null) return;
+  if (typeof signal.aborted !== "boolean") {
+    throw new TypeError("signal.aborted must be a boolean");
+  }
+  if (typeof signal.addEventListener !== "function") {
+    throw new TypeError("signal.addEventListener must be callable");
+  }
 }
 function readBody(request, signal) {
   return __async(this, null, function* () {

@@ -1,10 +1,11 @@
-package console
+package console_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/console"
 	"github.com/sealdice/goja_ext/require"
 )
 
@@ -12,7 +13,7 @@ func TestConsole(t *testing.T) {
 	vm := goja.New()
 
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	console.Enable(vm)
 
 	if c := vm.Get("console"); c == nil {
 		t.Fatal("console not found")
@@ -42,7 +43,7 @@ func TestConsole(t *testing.T) {
 func TestConsoleWithPrinter(t *testing.T) {
 	var stdoutStr, stderrStr string
 
-	printer := StdPrinter{
+	printer := console.StdPrinter{
 		StdoutPrint: func(s string) { stdoutStr += s },
 		StderrPrint: func(s string) { stderrStr += s },
 	}
@@ -51,8 +52,8 @@ func TestConsoleWithPrinter(t *testing.T) {
 
 	registry := new(require.Registry)
 	registry.Enable(vm)
-	registry.RegisterNativeModule(ModuleName, RequireWithPrinter(printer))
-	Enable(vm)
+	registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(printer))
+	console.Enable(vm)
 
 	if c := vm.Get("console"); c == nil {
 		t.Fatal("console not found")
@@ -80,7 +81,7 @@ func TestConsoleWithPrinter(t *testing.T) {
 
 func TestConsoleTraceIncludesFormattedMessageAndStack(t *testing.T) {
 	var stderr string
-	printer := StdPrinter{
+	printer := console.StdPrinter{
 		StdoutPrint: func(string) {},
 		StderrPrint: func(s string) { stderr += s },
 	}
@@ -88,8 +89,8 @@ func TestConsoleTraceIncludesFormattedMessageAndStack(t *testing.T) {
 	vm := goja.New()
 	registry := new(require.Registry)
 	registry.Enable(vm)
-	registry.RegisterNativeModule(ModuleName, RequireWithPrinter(printer))
-	Enable(vm)
+	registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(printer))
+	console.Enable(vm)
 
 	_, err := vm.RunScript("trace_test.js", `
 		function caller() { console.trace("value=%d", 2); }

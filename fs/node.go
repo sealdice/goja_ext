@@ -141,10 +141,7 @@ func (m *moduleInstance) exists(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
 	return m.nodeCall(call, func() (any, error) {
 		_, err := m.core.Stat(name)
-		if err != nil {
-			return false, nil
-		}
-		return true, nil
+		return err == nil, nil
 	}, func(rt *goja.Runtime, value any) goja.Value {
 		return rt.ToValue(value.(bool))
 	})
@@ -354,9 +351,9 @@ func (m *moduleInstance) createReadStream(call goja.FunctionCall) goja.Value {
 		panicJSError(m.rt, err)
 	}
 	if start > 0 {
-		if _, err := handle.Seek(int64(start), io.SeekStart); err != nil {
+		if _, seekErr := handle.Seek(int64(start), io.SeekStart); seekErr != nil {
 			_ = handle.Close()
-			panicJSError(m.rt, err)
+			panicJSError(m.rt, seekErr)
 		}
 	}
 
@@ -435,12 +432,12 @@ func (m *moduleInstance) createWriteStream(call goja.FunctionCall) goja.Value {
 
 	rt := m.rt
 	writeFn := rt.ToValue(func(call goja.FunctionCall) goja.Value {
-		data, err := bytesFromValue(rt, call.Argument(0))
-		if err != nil {
-			panicJSError(rt, err)
+		data, parseErr := bytesFromValue(rt, call.Argument(0))
+		if parseErr != nil {
+			panicJSError(rt, parseErr)
 		}
-		if err := handle.WriteAll(data); err != nil {
-			panicJSError(rt, err)
+		if writeErr := handle.WriteAll(data); writeErr != nil {
+			panicJSError(rt, writeErr)
 		}
 		return goja.Undefined()
 	})
@@ -474,7 +471,7 @@ func (m *moduleInstance) createWriteStream(call goja.FunctionCall) goja.Value {
 }
 
 func isEOF(err error) bool {
-	return err == io.EOF || errors.Is(err, io.EOF)
+	return errors.Is(err, io.EOF)
 }
 
 func nodeStreamConstructor(rt *goja.Runtime, name string) goja.Value {

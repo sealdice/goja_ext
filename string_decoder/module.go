@@ -212,6 +212,6 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 	_ = exports.Set("StringDecoder", newStringDecoderCtor(rt))
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

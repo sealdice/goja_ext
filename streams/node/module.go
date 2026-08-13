@@ -92,6 +92,6 @@ func privateQueueMicrotask(rt *goja.Runtime) goja.Value {
 	})
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

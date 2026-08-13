@@ -1,4 +1,4 @@
-package string_decoder
+package string_decoder_test
 
 import (
 	"testing"

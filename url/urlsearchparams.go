@@ -360,7 +360,7 @@ func getIteratorPrototype(r *goja.Runtime) (iteratorProto *goja.Object) {
 	} else {
 		panic(r.NewTypeError("[][Symbol.iterator is not a function"))
 	}
-	return
+	return iteratorProto
 }
 
 func (m *urlModule) getURLSearchParamsIteratorPrototype() *goja.Object {

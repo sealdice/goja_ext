@@ -132,7 +132,7 @@ func inspectArray(rt *goja.Runtime, obj *goja.Object, depth int, seen *seenSet) 
 		return "[]"
 	}
 	parts := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		v := obj.Get(strconv.Itoa(i))
 		parts[i] = inspectValue(rt, v, depth-1, seen)
 	}

@@ -56,11 +56,11 @@ type ReadlinkCapability interface {
 }
 
 type SymlinkCapability interface {
-	Symlink(string, string) error
+	Symlink(target, name string) error
 }
 
 type LinkCapability interface {
-	Link(string, string) error
+	Link(target, name string) error
 }
 
 type filesystemCapabilities struct {
@@ -312,7 +312,7 @@ func (c *Core) Realpath(name string) (string, error) {
 		return "", wrapPathError("realpath", resolved, "", syscall.ENOSYS)
 	}
 
-	for followed := 0; followed < 255; followed++ {
+	for range 255 {
 		parts := strings.Split(strings.TrimPrefix(resolved, "/"), "/")
 		prefix := "/"
 		changed := false

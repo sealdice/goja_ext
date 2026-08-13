@@ -10,30 +10,49 @@ import (
 	"github.com/sealdice/goja_ext/streams"
 )
 
+const streamReadBufferSize = 64 * 1024
+
+type streamReadBuffer [streamReadBufferSize]byte
+
+var streamReadBufferPool = sync.Pool{
+	New: func() any { return new(streamReadBuffer) },
+}
+
 // streamingBody pumps an io.ReadCloser into chunks consumed by a canonical
 // ReadableStream pull. Reads happen on a background goroutine; the pull
 // callback (running on the loop thread) never blocks. The queue is bounded so
 // long-lived streams (e.g. SSE) do not buffer unboundedly.
 type streamingBody struct {
-	scheduler runtimehost.Scheduler
-	body      io.ReadCloser
-	highWater int
-	cleanup   func()
-	cleanOnce sync.Once
+	scheduler      runtimehost.Scheduler
+	body           io.ReadCloser
+	highWater      int
+	cleanup        func()
+	cleanupOffLoop func()
+	cleanOnce      sync.Once
+	closeOnce      sync.Once
+	stopOnce       sync.Once
 
-	mu       sync.Mutex
-	queue    [][]byte
-	waiters  []func(interface{}) error
-	done     bool
-	err      error
-	closed   bool
-	started  bool
-	more     chan struct{}
-	closedCh chan struct{}
+	mu              sync.Mutex
+	queue           [][]byte
+	waiters         []func(interface{}) error
+	terminalWaiters []func(interface{}) error
+	done            bool
+	err             error
+	closed          bool
+	finalized       bool
+	started         bool
+	controller      *goja.Object
+	more            chan struct{}
+	closedCh        chan struct{}
 }
 
-func newStreamingBody(scheduler runtimehost.Scheduler, body io.ReadCloser, cleanup func()) *streamingBody {
-	return &streamingBody{
+func newStreamingBody(
+	scheduler runtimehost.Scheduler,
+	body io.ReadCloser,
+	cleanup func(),
+	cleanupOffLoop func(),
+) *streamingBody {
+	streaming := &streamingBody{
 		scheduler: scheduler,
 		body:      body,
 		highWater: 16,
@@ -41,6 +60,8 @@ func newStreamingBody(scheduler runtimehost.Scheduler, body io.ReadCloser, clean
 		more:      make(chan struct{}, 1),
 		closedCh:  make(chan struct{}),
 	}
+	streaming.cleanupOffLoop = cleanupOffLoop
+	return streaming
 }
 
 func (b *streamingBody) start() {
@@ -55,6 +76,9 @@ func (b *streamingBody) start() {
 }
 
 func (b *streamingBody) pump() {
+	readBuffer := streamReadBufferPool.Get().(*streamReadBuffer)
+	defer streamReadBufferPool.Put(readBuffer)
+
 	for {
 		b.mu.Lock()
 		if b.closed {
@@ -72,45 +96,60 @@ func (b *streamingBody) pump() {
 		}
 		b.mu.Unlock()
 
-		buf := make([]byte, 64*1024)
-		n, err := b.body.Read(buf)
+		n, err := b.body.Read(readBuffer[:])
 
-		if n > 0 {
-			chunk := append([]byte(nil), buf[:n]...)
-			b.mu.Lock()
-			b.queue = append(b.queue, chunk)
-			waiters := b.waiters
-			b.waiters = nil
+		b.mu.Lock()
+		if b.closed {
 			b.mu.Unlock()
-			b.wake(waiters, false)
+			return
+		}
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, readBuffer[:n])
+			b.queue = append(b.queue, chunk)
 		}
 
 		if err != nil {
-			b.mu.Lock()
 			b.err = err
 			b.done = true
-			waiters := b.waiters
+			b.terminalWaiters = append(b.terminalWaiters, b.waiters...)
 			b.waiters = nil
 			b.mu.Unlock()
-			b.wake(waiters, true)
-			_ = b.body.Close()
+			b.scheduleTerminal()
+			b.closeBody()
 			return
+		}
+
+		waiters := b.waiters
+		b.waiters = nil
+		b.mu.Unlock()
+		if n > 0 {
+			b.wake(waiters)
 		}
 	}
 }
 
-func (b *streamingBody) wake(waiters []func(interface{}) error, terminal bool) {
-	if len(waiters) == 0 && !terminal {
+func (b *streamingBody) wake(waiters []func(interface{}) error) {
+	if len(waiters) == 0 {
 		return
 	}
-	b.scheduler.RunOnLoop(func(*goja.Runtime) {
+	if b.scheduler.RunOnLoop(func(*goja.Runtime) {
 		for _, r := range waiters {
 			_ = r(goja.Undefined())
 		}
-		if terminal {
-			b.runCleanup()
-		}
-	})
+	}) {
+		return
+	}
+	b.terminateOffLoop()
+}
+
+func (b *streamingBody) scheduleTerminal() {
+	if b.scheduler.RunOnLoop(func(rt *goja.Runtime) {
+		b.finishOnLoop(rt)
+	}) {
+		return
+	}
+	b.terminateOffLoop()
 }
 
 func (b *streamingBody) runCleanup() {
@@ -121,25 +160,143 @@ func (b *streamingBody) runCleanup() {
 	})
 }
 
-func (b *streamingBody) close() {
+func (b *streamingBody) runCleanupOffLoop() {
+	b.cleanOnce.Do(func() {
+		if b.cleanupOffLoop != nil {
+			b.cleanupOffLoop()
+		}
+	})
+}
+
+func (b *streamingBody) terminateOffLoop() {
 	b.mu.Lock()
-	if b.closed {
+	if b.finalized {
 		b.mu.Unlock()
 		return
 	}
+	b.finalized = true
 	b.closed = true
-	body := b.body
-	waiters := b.waiters
+	b.queue = nil
 	b.waiters = nil
+	b.terminalWaiters = nil
 	b.mu.Unlock()
-	close(b.closedCh)
+	b.stop()
+	b.closeBody()
+	b.runCleanupOffLoop()
+}
+
+func (b *streamingBody) close() {
+	b.mu.Lock()
+	if b.finalized {
+		b.mu.Unlock()
+		return
+	}
+	b.finalized = true
+	b.closed = true
+	b.queue = nil
+	waiters := make([]func(interface{}) error, 0, len(b.waiters)+len(b.terminalWaiters))
+	waiters = append(waiters, b.waiters...)
+	waiters = append(waiters, b.terminalWaiters...)
+	b.waiters = nil
+	b.terminalWaiters = nil
+	b.mu.Unlock()
+	b.stop()
 	for _, r := range waiters {
 		_ = r(goja.Undefined())
 	}
-	if body != nil {
-		_ = body.Close()
-	}
+	b.closeBody()
 	b.runCleanup()
+}
+
+func (b *streamingBody) abort(rt *goja.Runtime, reason goja.Value) {
+	b.mu.Lock()
+	if b.finalized {
+		b.mu.Unlock()
+		return
+	}
+	b.finalized = true
+	b.closed = true
+	b.queue = nil
+	waiters := make([]func(interface{}) error, 0, len(b.waiters)+len(b.terminalWaiters))
+	waiters = append(waiters, b.waiters...)
+	waiters = append(waiters, b.terminalWaiters...)
+	b.waiters = nil
+	b.terminalWaiters = nil
+	controller := b.controller
+	b.mu.Unlock()
+
+	b.stop()
+	if controller != nil {
+		callFetchController(rt, controller, "error", valueOrUndefined(reason))
+	}
+	for _, resolve := range waiters {
+		_ = resolve(goja.Undefined())
+	}
+	b.closeBody()
+	b.runCleanup()
+}
+
+func (b *streamingBody) finishOnLoop(rt *goja.Runtime) {
+	b.mu.Lock()
+	if b.finalized {
+		b.mu.Unlock()
+		return
+	}
+	b.finalized = true
+	b.closed = true
+	chunks := b.queue
+	b.queue = nil
+	waiters := make([]func(interface{}) error, 0, len(b.waiters)+len(b.terminalWaiters))
+	waiters = append(waiters, b.waiters...)
+	waiters = append(waiters, b.terminalWaiters...)
+	b.waiters = nil
+	b.terminalWaiters = nil
+	err := b.err
+	controller := b.controller
+	b.mu.Unlock()
+
+	b.stop()
+	b.closeBody()
+	b.runCleanup()
+	if controller != nil {
+		if err != nil && !errors.Is(err, io.EOF) {
+			cause := rt.NewGoError(err)
+			callFetchController(rt, controller, "error", fetchNetworkError(rt, cause))
+		} else {
+			for _, chunk := range chunks {
+				callFetchController(rt, controller, "enqueue", bytesValue(rt, chunk))
+			}
+			callFetchController(rt, controller, "close")
+		}
+	}
+	for _, resolve := range waiters {
+		_ = resolve(goja.Undefined())
+	}
+}
+
+func fetchNetworkError(rt *goja.Runtime, cause goja.Value) goja.Value {
+	fetchError := Exports(rt).Get("_FetchError").ToObject(rt)
+	networkError, ok := goja.AssertFunction(fetchError.Get("NETWORK_ERROR"))
+	if !ok {
+		return cause
+	}
+	value, err := networkError(fetchError, rt.ToValue("Network error"), cause)
+	if err != nil {
+		return cause
+	}
+	return value
+}
+
+func (b *streamingBody) stop() {
+	b.stopOnce.Do(func() { close(b.closedCh) })
+}
+
+func (b *streamingBody) closeBody() {
+	b.closeOnce.Do(func() {
+		if b.body != nil {
+			_ = b.body.Close()
+		}
+	})
 }
 
 func (b *streamingBody) signalMore() {
@@ -163,14 +320,8 @@ func (b *streamingBody) pull(rt *goja.Runtime, controller *goja.Object) goja.Val
 		return goja.Undefined()
 	}
 	if b.done {
-		err := b.err
 		b.mu.Unlock()
-		b.runCleanup()
-		if err != nil && !errors.Is(err, io.EOF) {
-			callFetchController(rt, controller, "error", rt.NewGoError(err))
-		} else {
-			callFetchController(rt, controller, "close")
-		}
+		b.finishOnLoop(rt)
 		return goja.Undefined()
 	}
 	promise, resolve, _ := rt.NewPromise()
@@ -181,10 +332,23 @@ func (b *streamingBody) pull(rt *goja.Runtime, controller *goja.Object) goja.Val
 
 // fetchReadableStream builds a canonical ReadableStream that streams the given
 // HTTP body. The pull path never blocks the loop thread.
-func fetchReadableStream(rt *goja.Runtime, scheduler runtimehost.Scheduler, body io.ReadCloser, cleanup func()) goja.Value {
-	b := newStreamingBody(scheduler, body, cleanup)
-	b.start()
+func fetchReadableStream(
+	rt *goja.Runtime,
+	scheduler runtimehost.Scheduler,
+	body io.ReadCloser,
+	cleanup func(),
+	cleanupOffLoop func(),
+	abort *dispatchAbortState,
+) (*goja.Object, error) {
+	b := newStreamingBody(scheduler, body, cleanup, cleanupOffLoop)
 	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
+		Start: func(controller *goja.Object) goja.Value {
+			b.mu.Lock()
+			b.controller = controller
+			b.mu.Unlock()
+			b.start()
+			return goja.Undefined()
+		},
 		Pull: func(controller *goja.Object) goja.Value {
 			return b.pull(rt, controller)
 		},
@@ -194,9 +358,15 @@ func fetchReadableStream(rt *goja.Runtime, scheduler runtimehost.Scheduler, body
 		},
 	})
 	if err != nil {
-		panic(err)
+		b.close()
+		return nil, err
 	}
-	return stream
+	if abort != nil {
+		abort.setHandler(func(reason goja.Value) {
+			b.abort(rt, reason)
+		})
+	}
+	return stream, nil
 }
 
 func callFetchController(rt *goja.Runtime, controller *goja.Object, name string, args ...goja.Value) {
@@ -210,7 +380,8 @@ func callFetchController(rt *goja.Runtime, controller *goja.Object, name string,
 }
 
 func bytesValue(rt *goja.Runtime, data []byte) goja.Value {
-	arrayBuffer := rt.NewArrayBuffer(append([]byte(nil), data...))
+	// NewArrayBuffer keeps data as its backing store; callers transfer ownership.
+	arrayBuffer := rt.NewArrayBuffer(data)
 	typed, err := rt.New(rt.Get("Uint8Array"), rt.ToValue(arrayBuffer))
 	if err != nil {
 		panic(err)

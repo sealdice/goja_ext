@@ -1,4 +1,4 @@
-package buffer
+package buffer_test
 
 import (
 	_ "embed"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/buffer"
 	"github.com/sealdice/goja_ext/require"
 )
 
@@ -174,11 +175,11 @@ func TestWrapBytes(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
 	b := []byte{1, 2, 3}
-	buffer := GetApi(vm)
-	if err := vm.Set("b", buffer.WrapBytes(b)); err != nil {
+	buf := buffer.GetApi(vm)
+	if err := vm.Set("b", buf.WrapBytes(b)); err != nil {
 		t.Fatal(err)
 	}
-	Enable(vm)
+	buffer.Enable(vm)
 	_, err := vm.RunString(`
 		if (typeof Buffer !== "function") {
 			throw new Error("Buffer is not a function: " + typeof Buffer);
@@ -413,15 +414,11 @@ func runTestCases(t *testing.T, tcs []testCase) {
 			if tc.expectedErr != "" {
 				if err == nil {
 					t.Errorf("expected error %q, but got none", tc.expectedErr)
-				} else {
-					if !strings.HasPrefix(err.Error(), tc.expectedErr) {
-						t.Errorf("expected error %q, got %q", tc.expectedErr, err.Error())
-					}
+				} else if !strings.HasPrefix(err.Error(), tc.expectedErr) {
+					t.Errorf("expected error %q, got %q", tc.expectedErr, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("expected no error, but got %q", err.Error())
-				}
+			} else if err != nil {
+				t.Errorf("expected no error, but got %q", err.Error())
 			}
 		})
 	}
@@ -1632,7 +1629,6 @@ func TestBuffer_write(t *testing.T) {
 }
 
 func TestBuffer_writeBigInt64BE(t *testing.T) {
-
 	tcs := []testCase{
 		{
 			name: "write with default offset",

@@ -1,19 +1,21 @@
-package url
+package url_test
 
 import (
 	_ "embed"
+	"errors"
 	"testing"
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/console"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/url"
 )
 
 func createVM() *goja.Runtime {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
 	console.Enable(vm)
-	Enable(vm)
+	url.Enable(vm)
 	return vm
 }
 
@@ -45,7 +47,8 @@ func TestURLSearchParameters(t *testing.T) {
 
 	_, err := vm.RunScript("testdata/url_search_params.js", url_search_params)
 	if err != nil {
-		if ex, ok := err.(*goja.Exception); ok {
+		ex := &goja.Exception{}
+		if errors.As(err, &ex) {
 			t.Fatal(ex.String())
 		}
 		t.Fatal("Failed to process url script.", err)

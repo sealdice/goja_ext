@@ -80,6 +80,6 @@ func RegisterWithRegistry(registry *require.Registry) {
 	registry.RegisterNativeModule(require.NodePrefix+ModuleName, Require)
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

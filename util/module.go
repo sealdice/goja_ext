@@ -105,6 +105,6 @@ func New(runtime *goja.Runtime) *Util {
 	}
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

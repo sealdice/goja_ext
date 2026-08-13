@@ -1,4 +1,4 @@
-package fs
+package fs_test
 
 import (
 	"strings"
@@ -30,6 +30,27 @@ func TestNodeCallbackAPI(t *testing.T) {
 		});
 	`)
 	if result != "read:alpha|isFile:true,size:5|append:alpha-beta|exists:false" {
+		t.Fatalf("unexpected: %s", result)
+	}
+}
+
+func TestNodeExistsReturnsFalseOnAnyStatError(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeFileSync("f.txt", "x");
+		const results = [];
+		fs.exists("f.txt/child", function (err, exists) {
+			results.push("badParent:" + exists);
+			fs.exists("nope.txt", function (err2, exists2) {
+				results.push("missing:" + exists2);
+				fs.exists("f.txt", function (err3, exists3) {
+					results.push("present:" + exists3);
+					globalThis.__result = results.join("|");
+				});
+			});
+		});
+	`)
+	if result != "badParent:false|missing:false|present:true" {
 		t.Fatalf("unexpected: %s", result)
 	}
 }

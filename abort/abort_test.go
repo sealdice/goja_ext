@@ -1,10 +1,11 @@
-package abort
+package abort_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/abort"
 	"github.com/sealdice/goja_ext/require"
 	"github.com/sealdice/goja_ext/runtimehost"
 )
@@ -20,7 +21,7 @@ func (s *directScheduler) RunOnLoop(fn func(*goja.Runtime)) bool {
 func TestEnableAndRequireShareCanonicalConstructors(t *testing.T) {
 	rt := goja.New()
 	new(require.Registry).Enable(rt)
-	Enable(rt)
+	abort.Enable(rt)
 
 	value, err := rt.RunString(`
 		const abort = require("abort");
@@ -42,7 +43,7 @@ func newRT(t *testing.T) *goja.Runtime {
 	if err := runtimehost.BindScheduler(rt, &directScheduler{rt: rt}); err != nil {
 		t.Fatal(err)
 	}
-	Enable(rt)
+	abort.Enable(rt)
 	// setTimeout stub for AbortSignal.timeout
 	_ = rt.Set("setTimeout", func(call goja.FunctionCall) goja.Value {
 		if fn, ok := goja.AssertFunction(call.Argument(0)); ok {
@@ -156,7 +157,7 @@ func TestAbortSignal_ListenerAddedAfterAbortDoesNotFire(t *testing.T) {
 
 func TestAbortSignalTimeoutRequiresScheduler(t *testing.T) {
 	rt := goja.New()
-	Enable(rt)
+	abort.Enable(rt)
 	_, err := rt.RunString(`AbortSignal.timeout(1)`)
 	if err == nil || !strings.Contains(err.Error(), "scheduler") {
 		t.Fatalf("timeout error = %v", err)

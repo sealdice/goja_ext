@@ -62,7 +62,7 @@ func main() {
 		if value != "hello streams" {
 			panic("unexpected streams result: " + value)
 		}
-		fmt.Println(value)
+		fmt.Println(value) //nolint:forbidigo // Example output.
 	case <-time.After(3 * time.Second):
 		panic("timed out waiting for stream consumption")
 	}

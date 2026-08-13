@@ -63,7 +63,7 @@ func main() {
 		if value != "example abort" {
 			panic("unexpected fetch result: " + value)
 		}
-		fmt.Println(value)
+		fmt.Println(value) //nolint:forbidigo // Example output.
 	case <-time.After(3 * time.Second):
 		panic("timed out waiting for fetch cancellation")
 	}

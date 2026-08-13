@@ -7,9 +7,12 @@
   ],
   "scripts": {
     "build:fetch": "node scripts/build-fetch.mjs",
-    "build:node-streams": "node scripts/build-node-streams.mjs"
+    "build:fetch-event-source": "node scripts/build-fetch-event-source.mjs",
+    "build:node-streams": "node scripts/build-node-streams.mjs",
+    "test:types": "tsc -p types/tsconfig.json"
   },
   "devDependencies": {
+    "@microsoft/fetch-event-source": "2.0.1",
     "b4a": "^1.8.1",
     "bare-fetch": "3.2.0",
     "bare-form-data": "1.2.2",

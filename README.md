@@ -38,7 +38,7 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 | buffer | require("buffer")；global: Buffer | Buffer 构造、from、alloc、concat、数字读写和编码转换 | 只承诺当前 codec 表；Web Streams 和 FS 字节结果仍是 Uint8Array，不会自动变成 Buffer |
 | console | require("console")；global: console | log、info、warn、error、debug、trace | 输出交给 Go 的 Printer；格式化是轻量 util.format，不是 Node 完整 console |
 | abort | require("abort")；global: AbortController、AbortSignal | 取消控制、timeout、throwIfAborted | 面向 Fetch 等模块的轻量实现，不承诺浏览器/Node 完整 Abort API |
-| fetch | require("fetch")；global: fetch、EventSource、Headers、Request、Response、FormData | HTTP Fetch、请求体、响应体 Web Stream、SSE、超时、代理、取消 | HTTP 由 Go Resty 执行；mode/credentials 等浏览器约束不完整，必须有 event loop |
+| fetch | require("fetch")、require("@microsoft/fetch-event-source")；global: fetch、Headers、Request、Response、FormData | HTTP Fetch、请求/响应体 Web Stream、POST SSE、超时、代理、取消 | HTTP 使用 Resty 配置的 Go client；流式上传不可用于 307/308 重放，必须有 event loop |
 | fs | require("fs")、require("fs/promises")；global: fs | Afero-backed Deno 风格文件 API、Node callback/Promise wrapper、Stats、文件流 | 后端由宿主注入；symlink/hard link 等能力必须显式提供；watch、文件锁、terminal 不在当前子集；字节为 Uint8Array |
 | path | require("path")；另有 posix、win32 | 路径拼接、解析、规范化、相对路径、盘符和 UNC | resolve 读取 runtime-local cwd，不调用宿主进程 chdir；只实现列出的 path API |
 | process | require("process")；global: process | env 快照、cwd、runtime-local chdir | 当前不含 nextTick、argv、platform 等进程控制信息；不会修改宿主进程 cwd |
@@ -72,8 +72,9 @@ console.log(query.get("q"), inspect(bytes));
 
 启用 abort 和 fetch 后可以取消异步请求：
 
-fetch.Enable 会安装 Headers、Request、Response、FormData；真正的 fetch 函数和
-EventSource 需要 Go 宿主再调用 EnableFetch，并提供 event loop。
+fetch.Enable 会安装 Headers、Request、Response、FormData；真正的 fetch 函数需要
+Go 宿主再调用 EnableFetch，并提供 event loop。SSE 客户端由
+require("@microsoft/fetch-event-source") 提供。
 
 ~~~javascript
 const controller = new AbortController();
@@ -96,7 +97,7 @@ Fetch 的 Response.body 是 Web ReadableStream，读取时得到 Uint8Array：
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    // value 是 Uint8Array；需要字符串时显式使用 TextDecoderStream 或 Buffer。
+    // value 是 Uint8Array；需要字符串时显式使用 TextDecoder 或 Buffer。
     console.log(value.byteLength);
   }
 })();
@@ -284,8 +285,11 @@ if err := websocket.Enable(rt, loop); err != nil {
 ~~~
 
 Fetch 的 WithTimeout、WithProxy、WithHTTPClient、WithTransport 和 WithRestyClient
-只影响 Go 侧 HTTP 执行器，不会暴露为 JavaScript 全局属性。WebSocket 的 TLS、拨号器、
-日志器和连接管理器可通过 EnableWithOptions 注入；默认 TLS 会校验证书和主机名。
+只影响 Go 侧 HTTP 执行器，不会暴露为 JavaScript 全局属性。WithTimeout 对应 Go
+http.Client 的请求总超时，包含完整响应体读取时间；默认值为 0，即不启用超时。SSE
+等长连接不应设置 WithTimeout，应使用 AbortSignal 或 AbortSignal.timeout 主动取消。
+WebSocket 的 TLS、拨号器、日志器和连接管理器可通过 EnableWithOptions 注入；默认
+TLS 会校验证书和主机名。
 
 ### 配置 FS 与 Node 文件流
 

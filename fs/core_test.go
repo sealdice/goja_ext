@@ -1,4 +1,4 @@
-package fs
+package fs //nolint:testpackage
 
 import (
 	"errors"
@@ -25,17 +25,17 @@ func TestCoreMemMapFileLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := core.MkdirAll("docs", 0o755); err != nil {
+	if err = core.MkdirAll("docs", 0o755); err != nil {
 		t.Fatal(err)
 	}
 	file, err := core.OpenFile("docs/readme.txt", openWrite|openCreate|openTruncate, 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Write([]byte("hello")); err != nil {
+	if _, err = file.Write([]byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Close(); err != nil {
+	if err = file.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -91,13 +91,13 @@ func TestCoreAferoBackendWrappers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Write([]byte("inside")); err != nil {
+	if _, err = file.Write([]byte("inside")); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Close(); err != nil {
+	if err = file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.Stat("/sandbox/nested.txt"); err != nil {
+	if _, err = base.Stat("/sandbox/nested.txt"); err != nil {
 		t.Fatalf("base path backend did not receive file: %v", err)
 	}
 
@@ -123,10 +123,10 @@ func TestCoreOsFsSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Write([]byte("host")); err != nil {
+	if _, err = file.Write([]byte("host")); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Close(); err != nil {
+	if err = file.Close(); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "host.txt"))
@@ -190,10 +190,10 @@ func TestOpenFlagCreateNew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Write([]byte("data")); err != nil {
+	if _, err = f.Write([]byte("data")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	_, err = core.OpenFile("x", openWrite|openCreateNew, 0o644)
@@ -211,20 +211,20 @@ func TestOpenFlagAppend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Write([]byte("AB")); err != nil {
+	if _, err = f.Write([]byte("AB")); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	a, err := core.OpenFile("f", openWrite|openAppend, 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.Write([]byte("C")); err != nil {
+	if _, err = a.Write([]byte("C")); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Close(); err != nil {
+	if err = a.Close(); err != nil {
 		t.Fatal(err)
 	}
 	r, err := core.OpenFile("f", openRead, 0)

@@ -1,4 +1,4 @@
-package node
+package node //nolint:testpackage
 
 import (
 	"testing"
