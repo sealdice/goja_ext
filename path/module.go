@@ -123,19 +123,19 @@ func newPathObject(rt *goja.Runtime, impl pathImpl) *goja.Object {
 	})
 	set("parse", func(call goja.FunctionCall) goja.Value {
 		root, dir, base, name, ext := impl.parse(str(call.Argument(0)))
-		obj := rt.NewObject()
-		_ = obj.Set("root", root)
-		_ = obj.Set("dir", dir)
-		_ = obj.Set("base", base)
-		_ = obj.Set("name", name)
-		_ = obj.Set("ext", ext)
-		return obj
+		result := rt.NewObject()
+		_ = result.Set("root", root)
+		_ = result.Set("dir", dir)
+		_ = result.Set("base", base)
+		_ = result.Set("name", name)
+		_ = result.Set("ext", ext)
+		return result
 	})
 	set("format", func(call goja.FunctionCall) goja.Value {
-		obj := call.Argument(0).ToObject(rt)
-		root := property(obj, "root")
-		dir := property(obj, "dir")
-		base := property(obj, "base")
+		arg := call.Argument(0).ToObject(rt)
+		root := property(arg, "root")
+		dir := property(arg, "dir")
+		base := property(arg, "base")
 		return rt.ToValue(impl.format(root, dir, base))
 	})
 	set("toNamespacedPath", func(call goja.FunctionCall) goja.Value {
@@ -259,7 +259,7 @@ func (posixImpl) parse(p string) (root, dir, base, name, ext string) {
 	if base == posixSep {
 		dir = posixSep
 		name = posixSep
-		return
+		return root, dir, base, name, ext
 	}
 	ext = path.Ext(base)
 	if ext != "" {
@@ -274,7 +274,7 @@ func (posixImpl) parse(p string) (root, dir, base, name, ext string) {
 	if dir == posixSep {
 		dir = root
 	}
-	return
+	return root, dir, base, name, ext
 }
 
 func (posixImpl) format(root, dir, base string) string {
@@ -295,6 +295,6 @@ func (posixImpl) format(root, dir, base string) string {
 
 func (posixImpl) toNamespacedPath(p string) string { return p }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

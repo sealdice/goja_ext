@@ -1,4 +1,4 @@
-package fetch
+package fetch //nolint:testpackage
 
 import (
 	"fmt"
@@ -237,12 +237,16 @@ func TestFetchStripsAuthorizationAcrossOrigins(t *testing.T) {
 	}
 }
 
-func TestFetchAbortWhileBufferingUploadDoesNotReachNetwork(t *testing.T) {
+func TestFetchAbortWhileStreamingUploadCancelsBody(t *testing.T) {
 	var requests atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	bodyDone := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		bodyDone <- struct{}{}
 	}))
 	defer srv.Close()
+	t.Cleanup(srv.CloseClientConnections)
 
 	loop := startFetchLoop(t)
 	runSync(t, loop, func(rt *goja.Runtime) {
@@ -256,7 +260,10 @@ func TestFetchAbortWhileBufferingUploadDoesNotReachNetwork(t *testing.T) {
 			globalThis.__done = false
 			const { ReadableStream } = require("stream/web")
 			const controller = new AbortController()
-			const body = new ReadableStream({ pull() { return new Promise(() => {}) } })
+			const body = new ReadableStream({
+				pull() { return new Promise(() => {}) },
+				cancel(reason) { globalThis.__uploadCancelReason = reason }
+			})
 			fetch("` + srv.URL + `", {method: "POST", body, signal: controller.signal}).then(
 				() => { globalThis.__uploadAbort = "resolved" },
 				(error) => { globalThis.__uploadAbort = String(error) }
@@ -271,8 +278,18 @@ func TestFetchAbortWhileBufferingUploadDoesNotReachNetwork(t *testing.T) {
 	if got := gstr(t, loop, "__uploadAbort"); got != "upload-stopped" {
 		t.Fatalf("upload abort = %q", got)
 	}
-	if got := requests.Load(); got != 0 {
+	if got := gstr(t, loop, "__uploadCancelReason"); got != "upload-stopped" {
+		t.Fatalf("upload stream cancel reason = %q", got)
+	}
+	if got := requests.Load(); got > 1 {
 		t.Fatalf("aborted upload reached server %d times", got)
+	}
+	if requests.Load() == 1 {
+		select {
+		case <-bodyDone:
+		case <-time.After(time.Second):
+			t.Fatal("server request body did not stop after abort")
+		}
 	}
 }
 

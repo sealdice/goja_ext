@@ -54,7 +54,7 @@ func (a *aferoLinks) Readlink(name string) (string, error) {
 	}
 	target, err := reader.ReadlinkIfPossible(name)
 	if errors.Is(err, afero.ErrNoReadlink) {
-		return "", fmt.Errorf("%w: %v", syscall.ENOSYS, err)
+		return "", fmt.Errorf("%w: %w", syscall.ENOSYS, err)
 	}
 	return target, err
 }
@@ -66,7 +66,7 @@ func (a *aferoLinks) Symlink(target, name string) error {
 	}
 	err := linker.SymlinkIfPossible(target, name)
 	if errors.Is(err, afero.ErrNoSymlink) {
-		return fmt.Errorf("%w: %v", syscall.ENOSYS, err)
+		return fmt.Errorf("%w: %w", syscall.ENOSYS, err)
 	}
 	return err
 }

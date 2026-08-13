@@ -27,6 +27,8 @@ var (
 	runtimeFullExportsKey     = runtimehost.NewKey("fs.exports")
 	runtimePromisesExportsKey = runtimehost.NewKey("fs.promises.exports")
 	runtimeGlobalExportsKey   = runtimehost.NewKey("fs.global.exports")
+
+	errNoExports = errors.New("fs: exports not yet initialized")
 )
 
 type runtimeCoreState struct {
@@ -109,7 +111,9 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 			panic(fmt.Errorf("fs: configure exports: %w", err))
 		}
 		if cached, err := cachedExports(rt, promises, scheduler, cfg); err != nil {
-			panic(err)
+			if !errors.Is(err, errNoExports) {
+				panic(err)
+			}
 		} else if cached != nil {
 			if err := module.Set("exports", cached); err != nil {
 				panic(err)
@@ -135,7 +139,7 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 func cachedExports(rt *goja.Runtime, promises bool, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
 	value, ok := runtimehost.Load(rt, exportsKey(promises))
 	if !ok {
-		return nil, nil
+		return nil, errNoExports
 	}
 	state, ok := value.(*runtimeExportsState)
 	if !ok {
@@ -157,7 +161,25 @@ func exportsKey(promises bool) *runtimehost.Key {
 	return runtimeFullExportsKey
 }
 
-func coreForRuntime(rt *goja.Runtime, opts ...Option) (*Core, error) {
+// EnsureCore returns the canonical Afero-backed Core associated with rt.
+// Modules that share filesystem state should use this entry point instead of
+// constructing a separate Core for the same runtime.
+func EnsureCore(rt *goja.Runtime, opts ...Option) (*Core, error) {
+	if len(opts) == 0 {
+		if value, ok := runtimehost.Load(rt, runtimeCoreKey); ok {
+			state, ok := value.(*runtimeCoreState)
+			if !ok {
+				return nil, errors.New("fs: invalid runtime core state")
+			}
+			if state.err != nil {
+				return nil, state.err
+			}
+			if err := runtimehost.BindCwdProvider(rt, state.core); err != nil {
+				return nil, fmt.Errorf("bind cwd provider: %w", err)
+			}
+			return state.core, nil
+		}
+	}
 	cfg, err := configFromOptions(opts)
 	if err != nil {
 		return nil, err
@@ -182,13 +204,17 @@ func coreForRuntime(rt *goja.Runtime, opts ...Option) (*Core, error) {
 	return state.core, nil
 }
 
+func coreForRuntime(rt *goja.Runtime, opts ...Option) (*Core, error) {
+	return EnsureCore(rt, opts...)
+}
+
 func Enable(rt *goja.Runtime, opts ...Option) error {
 	return enable(rt, nil, opts...)
 }
 
 func EnableWithLoop(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
 	if loop == nil {
-		return fmt.Errorf("fs: event loop is required")
+		return errors.New("fs: event loop is required")
 	}
 	return enable(rt, loop, opts...)
 }
@@ -207,7 +233,9 @@ func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
 		return err
 	}
 	if cached, err := cachedGlobalExports(rt, scheduler, cfg); err != nil {
-		return err
+		if !errors.Is(err, errNoExports) {
+			return err
+		}
 	} else if cached != nil {
 		return rt.Set("fs", cached)
 	}
@@ -225,7 +253,7 @@ func enable(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...Option) error {
 func cachedGlobalExports(rt *goja.Runtime, scheduler runtimehost.Scheduler, cfg config) (*goja.Object, error) {
 	value, ok := runtimehost.Load(rt, runtimeGlobalExportsKey)
 	if !ok {
-		return nil, nil
+		return nil, errNoExports
 	}
 	state, ok := value.(*runtimeExportsState)
 	if !ok {
@@ -242,7 +270,7 @@ func cachedGlobalExports(rt *goja.Runtime, scheduler runtimehost.Scheduler, cfg 
 
 func schedulerForRuntime(rt *goja.Runtime, loop *eventloop.EventLoop) (runtimehost.Scheduler, error) {
 	if loop == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil scheduler means synchronous mode (no event loop)
 	}
 	if err := runtimehost.ValidateScheduler(rt, loop); err != nil {
 		return nil, err
@@ -263,7 +291,7 @@ func RequirePromises(rt *goja.Runtime, module *goja.Object) {
 	loader(rt, module)
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 	require.RegisterCoreModule(PromisesModuleName, RequirePromises)
 }

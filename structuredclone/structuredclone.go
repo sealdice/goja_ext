@@ -35,7 +35,7 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 	_ = exports.Set("structuredClone", structuredCloneFn(rt))
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }
 
@@ -53,7 +53,7 @@ func cloneValue(rt *goja.Runtime, value goja.Value, seen map[*goja.Object]goja.V
 		return value
 	}
 	if _, isSymbol := value.(*goja.Symbol); isSymbol {
-		throwDataCloneError(rt, "%s could not be cloned", value.String())
+		throwDataCloneErrorf(rt, "%s could not be cloned", value.String())
 	}
 
 	obj, isObject := value.(*goja.Object)
@@ -62,7 +62,7 @@ func cloneValue(rt *goja.Runtime, value goja.Value, seen map[*goja.Object]goja.V
 		return value
 	}
 	if _, callable := goja.AssertFunction(value); callable {
-		throwDataCloneError(rt, "%s could not be cloned", value.String())
+		throwDataCloneErrorf(rt, "%s could not be cloned", value.String())
 	}
 	if cached, ok := seen[obj]; ok {
 		return cached
@@ -87,12 +87,12 @@ func cloneValue(rt *goja.Runtime, value goja.Value, seen map[*goja.Object]goja.V
 	case "DataView":
 		return cloneView(rt, obj, kind, seen)
 	case "WeakMap", "WeakSet", "Promise":
-		throwDataCloneError(rt, "%s could not be cloned", kind)
+		throwDataCloneErrorf(rt, "%s could not be cloned", kind)
 	default:
 		if _, typedArray := typedArrayClasses[kind]; typedArray {
 			return cloneView(rt, obj, kind, seen)
 		}
-		throwDataCloneError(rt, "%s objects are not supported", kind)
+		throwDataCloneErrorf(rt, "%s objects are not supported", kind)
 	}
 	return nil
 }
@@ -121,7 +121,7 @@ func cloneArray(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goj
 	length := int(source.Get("length").ToInteger())
 	cloned := rt.NewArray()
 	seen[source] = cloned
-	for index := 0; index < length; index++ {
+	for index := range length {
 		key := strconv.Itoa(index)
 		mustSet(rt, cloned, key, cloneValue(rt, source.Get(key), seen))
 	}
@@ -216,7 +216,7 @@ func cloneRegExp(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]go
 func cloneArrayBuffer(rt *goja.Runtime, source *goja.Object, seen map[*goja.Object]goja.Value) goja.Value {
 	arrayBuffer, ok := source.Export().(goja.ArrayBuffer)
 	if !ok || arrayBuffer.Detached() {
-		throwDataCloneError(rt, "ArrayBuffer could not be cloned")
+		throwDataCloneErrorf(rt, "ArrayBuffer could not be cloned")
 	}
 	data := append([]byte(nil), arrayBuffer.Bytes()...)
 	cloned := rt.ToValue(rt.NewArrayBuffer(data)).ToObject(rt)
@@ -246,7 +246,7 @@ func cloneView(
 func mustConstruct(rt *goja.Runtime, name string, arguments ...goja.Value) *goja.Object {
 	constructor, ok := goja.AssertConstructor(rt.Get(name))
 	if !ok {
-		throwDataCloneError(rt, "%s constructor is unavailable", name)
+		throwDataCloneErrorf(rt, "%s constructor is unavailable", name)
 	}
 	object, err := constructor(nil, arguments...)
 	if err != nil {
@@ -258,18 +258,18 @@ func mustConstruct(rt *goja.Runtime, name string, arguments ...goja.Value) *goja
 func mustFunction(rt *goja.Runtime, value goja.Value, name string) goja.Callable {
 	function, ok := goja.AssertFunction(value)
 	if !ok {
-		throwDataCloneError(rt, "%s is unavailable", name)
+		throwDataCloneErrorf(rt, "%s is unavailable", name)
 	}
 	return function
 }
 
 func mustSet(rt *goja.Runtime, object *goja.Object, key string, value goja.Value) {
 	if err := object.Set(key, value); err != nil {
-		throwDataCloneError(rt, "property %q could not be cloned: %v", key, err)
+		throwDataCloneErrorf(rt, "property %q could not be cloned: %v", key, err)
 	}
 }
 
-func throwDataCloneError(rt *goja.Runtime, format string, arguments ...interface{}) {
+func throwDataCloneErrorf(rt *goja.Runtime, format string, arguments ...interface{}) {
 	err := rt.NewTypeError(fmt.Sprintf(format, arguments...))
 	_ = err.Set("name", "DataCloneError")
 	_ = err.Set("code", 25)

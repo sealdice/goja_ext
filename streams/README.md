@@ -11,8 +11,9 @@ WHATWG Streams 与 Node classic streams 的 Goja 实现。
 ## WHATWG 能力
 
 - `ReadableStream`（含 byte stream/BYOB、`from`、`values`、async iterator）、`WritableStream`、`TransformStream`、reader/writer/controller、`tee`/`pipeTo`/`pipeThrough`、两种 QueuingStrategy。
-- `TextEncoderStream` / `TextDecoderStream`（UTF-8）；编码器输出原生
-  `Uint8Array`，Web Streams 层不依赖 Node `Buffer`。
+- `TextEncoder` / `TextDecoder` 与 `TextEncoderStream` / `TextDecoderStream`
+  （UTF-8）；支持增量解码、BOM、fatal、ignoreBOM 和 encodeInto，编码器输出
+  原生 `Uint8Array`，Web Streams 层不依赖 Node `Buffer`。
 - Go 侧集成：`streams.NewReadableStream` / `NewWritableStream` / `IsReadableStream` / `ConsumeReadableStream`（`streams/integration.go`），供 fs、fetch 等复用 canonical 流。
 
 ## Node classic（streamx 引擎）

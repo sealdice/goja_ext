@@ -236,7 +236,7 @@ func (w win32Impl) parse(p string) (root, dir, base, name, ext string) {
 	if dir == root {
 		dir = root
 	}
-	return
+	return root, dir, base, name, ext
 }
 
 func (w win32Impl) format(root, dir, base string) string {

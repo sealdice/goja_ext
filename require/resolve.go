@@ -31,7 +31,7 @@ func (r *RequireModule) resolve(modpath string) (module *js.Object, err error) {
 	p := r.resolvePath(start, modpath)
 	if isFileOrDirectoryPath(modpath) {
 		if module = r.modules[p]; module != nil {
-			return
+			return module, err
 		}
 		module, err = r.loadAsFileOrDirectory(p)
 		if err == nil && module != nil {
@@ -40,16 +40,16 @@ func (r *RequireModule) resolve(modpath string) (module *js.Object, err error) {
 	} else {
 		module, err = r.loadNative(modpath)
 		if err == nil {
-			return
+			return module, nil
 		} else {
-			if err == InvalidModuleError {
+			if errors.Is(err, InvalidModuleError) {
 				err = nil
 			} else {
-				return
+				return module, err
 			}
 		}
 		if module = r.nodeModules[p]; module != nil {
-			return
+			return module, err
 		}
 		module, err = r.loadNodeModules(modpath, start)
 		if err == nil && module != nil {
@@ -60,7 +60,7 @@ func (r *RequireModule) resolve(modpath string) (module *js.Object, err error) {
 	if module == nil && err == nil {
 		err = InvalidModuleError
 	}
-	return
+	return module, err
 }
 
 func (r *RequireModule) loadNative(path string) (*js.Object, error) {
@@ -93,10 +93,8 @@ func (r *RequireModule) loadNative(path string) (*js.Object, error) {
 		if isBuiltIn {
 			if withPrefix {
 				r.modules[path[len(NodePrefix):]] = module
-			} else {
-				if !strings.HasPrefix(path, NodePrefix) {
-					r.modules[NodePrefix+path] = module
-				}
+			} else if !strings.HasPrefix(path, NodePrefix) {
+				r.modules[NodePrefix+path] = module
 			}
 		}
 		ldr(r.runtime, module)
@@ -108,7 +106,7 @@ func (r *RequireModule) loadNative(path string) (*js.Object, error) {
 
 func (r *RequireModule) loadAsFileOrDirectory(path string) (module *js.Object, err error) {
 	if module, err = r.loadAsFile(path); module != nil || err != nil {
-		return
+		return module, err
 	}
 
 	return r.loadAsDirectory(path)
@@ -116,12 +114,12 @@ func (r *RequireModule) loadAsFileOrDirectory(path string) (module *js.Object, e
 
 func (r *RequireModule) loadAsFile(path string) (module *js.Object, err error) {
 	if module, err = r.loadModule(path); module != nil || err != nil {
-		return
+		return module, err
 	}
 
 	p := path + ".js"
 	if module, err = r.loadModule(p); module != nil || err != nil {
-		return
+		return module, err
 	}
 
 	p = path + ".json"
@@ -131,7 +129,7 @@ func (r *RequireModule) loadAsFile(path string) (module *js.Object, err error) {
 func (r *RequireModule) loadIndex(modpath string) (module *js.Object, err error) {
 	p := r.resolvePath(modpath, "index.js")
 	if module, err = r.loadModule(p); module != nil || err != nil {
-		return
+		return module, err
 	}
 
 	p = r.resolvePath(modpath, "index.json")
@@ -154,7 +152,7 @@ func (r *RequireModule) loadAsDirectory(modpath string) (module *js.Object, err 
 
 	m := r.resolvePath(modpath, pkg.Main)
 	if module, err = r.loadAsFile(m); module != nil || err != nil {
-		return
+		return module, err
 	}
 
 	return r.loadIndex(m)
@@ -167,7 +165,7 @@ func (r *RequireModule) loadNodeModule(modpath, start string) (*js.Object, error
 func (r *RequireModule) loadNodeModules(modpath, start string) (module *js.Object, err error) {
 	for _, dir := range r.r.globalFolders {
 		if module, err = r.loadNodeModule(modpath, dir); module != nil || err != nil {
-			return
+			return module, err
 		}
 	}
 	for {
@@ -178,7 +176,7 @@ func (r *RequireModule) loadNodeModules(modpath, start string) (module *js.Objec
 			p = start
 		}
 		if module, err = r.loadNodeModule(modpath, p); module != nil || err != nil {
-			return
+			return module, err
 		}
 		if start == ".." { // Dir('..') is '.'
 			break
@@ -190,7 +188,7 @@ func (r *RequireModule) loadNodeModules(modpath, start string) (module *js.Objec
 		start = parent
 	}
 
-	return
+	return module, err
 }
 
 func (r *RequireModule) getCurrentModulePath() string {
@@ -229,7 +227,6 @@ func (r *RequireModule) loadModule(path string) (*js.Object, error) {
 }
 
 func (r *RequireModule) loadModuleFile(path string, jsModule *js.Object) error {
-
 	prg, err := r.r.getCompiledSource(path)
 
 	if err != nil {

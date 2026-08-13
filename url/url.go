@@ -73,7 +73,7 @@ func valueToURLPort(v goja.Value) (portNum int, empty bool) {
 			return 0, true
 		}
 		firstDigitIdx := -1
-		for i := 0; i < len(s); i++ {
+		for i := range len(s) {
 			if c := s[i]; c >= '0' && c <= '9' {
 				firstDigitIdx = i
 				break
@@ -88,7 +88,7 @@ func valueToURLPort(v goja.Value) (portNum int, empty bool) {
 			return 0, true
 		}
 
-		for i := 0; i < len(s); i++ {
+		for i := range len(s) {
 			if c := s[i]; c >= '0' && c <= '9' {
 				if portNum == -1 {
 					portNum = 0
@@ -103,7 +103,7 @@ func valueToURLPort(v goja.Value) (portNum int, empty bool) {
 			}
 		}
 	}
-	return
+	return portNum, empty
 }
 
 func isDefaultURLPort(protocol string, port int) bool {

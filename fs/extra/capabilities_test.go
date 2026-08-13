@@ -1,4 +1,4 @@
-package extra
+package extra_test
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	rootfs "github.com/sealdice/goja_ext/fs"
+	"github.com/sealdice/goja_ext/fs/extra"
 	"github.com/spf13/afero"
 )
 
@@ -27,7 +28,7 @@ func TestAferoLinkCapabilitiesUseRealSymlinkOperations(t *testing.T) {
 	core, err := rootfs.NewCore(
 		rootfs.WithFS(backend),
 		rootfs.WithCwd(directory),
-		rootfs.WithExtraCapabilities(FromAfero(backend)...),
+		rootfs.WithExtraCapabilities(extra.FromAfero(backend)...),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func TestAferoMemMapDoesNotPretendToSupportLstatOrRealpath(t *testing.T) {
 	core, err := rootfs.NewCore(
 		rootfs.WithFS(backend),
 		rootfs.WithCwd("/"),
-		rootfs.WithExtraCapabilities(FromAfero(backend)...),
+		rootfs.WithExtraCapabilities(extra.FromAfero(backend)...),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +95,7 @@ func TestRealpathDetectsSymlinkLoop(t *testing.T) {
 	core, err := rootfs.NewCore(
 		rootfs.WithFS(backend),
 		rootfs.WithCwd(directory),
-		rootfs.WithExtraCapabilities(FromAfero(backend)...),
+		rootfs.WithExtraCapabilities(extra.FromAfero(backend)...),
 	)
 	if err != nil {
 		t.Fatal(err)

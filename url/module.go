@@ -47,6 +47,6 @@ func Enable(runtime *goja.Runtime) {
 	must(runtime.Set("URLSearchParams", m.Get("URLSearchParams")))
 }
 
-func init() {
+func init() { //nolint:gochecknoinits // auto-register core module via blank import
 	require.RegisterCoreModule(ModuleName, Require)
 }

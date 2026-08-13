@@ -1,4 +1,4 @@
-package require
+package require_test
 
 import (
 	"bytes"
@@ -13,30 +13,31 @@ import (
 	"testing"
 
 	js "github.com/dop251/goja"
+	"github.com/sealdice/goja_ext/require"
 )
 
-func mapFileSystemSourceLoader(files map[string]string) SourceLoader {
+func mapFileSystemSourceLoader(files map[string]string) require.SourceLoader {
 	return func(p string) ([]byte, error) {
 		s, ok := files[filepath.ToSlash(p)]
 		if !ok {
-			return nil, ModuleFileDoesNotExistError
+			return nil, require.ModuleFileDoesNotExistError
 		}
 		return []byte(s), nil
 	}
 }
 
 func TestRequireNativeModule(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	var m = require("test/m");
 	m.test();
 	`
 
 	vm := js.New()
 
-	registry := new(Registry)
+	registry := new(require.Registry)
 	registry.Enable(vm)
 
-	RegisterNativeModule("test/m", func(runtime *js.Runtime, module *js.Object) {
+	require.RegisterNativeModule("test/m", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
 		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed")
@@ -45,7 +46,7 @@ func TestRequireNativeModule(t *testing.T) {
 		}
 	})
 
-	v, err := vm.RunString(SCRIPT)
+	v, err := vm.RunString(script)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +59,10 @@ func TestRequireNativeModule(t *testing.T) {
 func TestRegisterCoreModule(t *testing.T) {
 	vm := js.New()
 
-	registry := new(Registry)
+	registry := new(require.Registry)
 	registry.Enable(vm)
 
-	RegisterCoreModule("coremod", func(runtime *js.Runtime, module *js.Object) {
+	require.RegisterCoreModule("coremod", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
 		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed")
@@ -70,7 +71,7 @@ func TestRegisterCoreModule(t *testing.T) {
 		}
 	})
 
-	RegisterCoreModule("coremod1", func(runtime *js.Runtime, module *js.Object) {
+	require.RegisterCoreModule("coremod1", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
 		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("passed1")
@@ -79,7 +80,7 @@ func TestRegisterCoreModule(t *testing.T) {
 		}
 	})
 
-	RegisterCoreModule("node:test1", func(runtime *js.Runtime, module *js.Object) {
+	require.RegisterCoreModule("node:test1", func(runtime *js.Runtime, module *js.Object) {
 		o := module.Get("exports").(*js.Object)
 		if err := o.Set("test", func(call js.FunctionCall) js.Value {
 			return runtime.ToValue("test1 passed")
@@ -140,12 +141,12 @@ func TestRegisterCoreModule(t *testing.T) {
 }
 
 func TestRequireRegistryNativeModule(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	var log = require("test/log");
 	log.print('passed');
 	`
 
-	logWithOutput := func(w io.Writer, prefix string) ModuleLoader {
+	logWithOutput := func(w io.Writer, prefix string) require.ModuleLoader {
 		return func(vm *js.Runtime, module *js.Object) {
 			o := module.Get("exports").(*js.Object)
 			if err := o.Set("print", func(call js.FunctionCall) js.Value {
@@ -162,7 +163,7 @@ func TestRequireRegistryNativeModule(t *testing.T) {
 	vm1 := js.New()
 	buf1 := &bytes.Buffer{}
 
-	registry1 := new(Registry)
+	registry1 := new(require.Registry)
 	registry1.Enable(vm1)
 
 	registry1.RegisterNativeModule("test/log", logWithOutput(buf1, "vm1 "))
@@ -170,12 +171,12 @@ func TestRequireRegistryNativeModule(t *testing.T) {
 	vm2 := js.New()
 	buf2 := &bytes.Buffer{}
 
-	registry2 := new(Registry)
+	registry2 := new(require.Registry)
 	registry2.Enable(vm2)
 
 	registry2.RegisterNativeModule("test/log", logWithOutput(buf2, "vm2 "))
 
-	_, err := vm1.RunString(SCRIPT)
+	_, err := vm1.RunString(script)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +186,7 @@ func TestRequireRegistryNativeModule(t *testing.T) {
 		t.Fatalf("vm1: Unexpected result: %q", s)
 	}
 
-	_, err = vm2.RunString(SCRIPT)
+	_, err = vm2.RunString(script)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +231,7 @@ func TestRequire(t *testing.T) {
 		},
 	}
 
-	const SCRIPT = `
+	const script = `
 	var m = require(testPath);
 	m.test();
 	`
@@ -242,10 +243,10 @@ func TestRequire(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			registry := new(Registry)
+			registry := new(require.Registry)
 			registry.Enable(vm)
 
-			v, err := vm.RunString(SCRIPT)
+			v, err := vm.RunString(script)
 
 			ok := err == nil
 
@@ -265,12 +266,12 @@ func TestRequire(t *testing.T) {
 }
 
 func TestSourceLoader(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	var m = require("m.js");
 	m.test();
 	`
 
-	const MODULE = `
+	const module = `
 	function test() {
 		return "passed1";
 	}
@@ -280,15 +281,15 @@ func TestSourceLoader(t *testing.T) {
 
 	vm := js.New()
 
-	registry := NewRegistry(WithGlobalFolders("."), WithLoader(func(name string) ([]byte, error) {
+	registry := require.NewRegistry(require.WithGlobalFolders("."), require.WithLoader(func(name string) ([]byte, error) {
 		if name == "m.js" {
-			return []byte(MODULE), nil
+			return []byte(module), nil
 		}
 		return nil, errors.New("Module does not exist")
 	}))
 	registry.Enable(vm)
 
-	v, err := vm.RunString(SCRIPT)
+	v, err := vm.RunString(script)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,12 +300,12 @@ func TestSourceLoader(t *testing.T) {
 }
 
 func TestStrictModule(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	var m = require("m.js");
 	m.test();
 	`
 
-	const MODULE = `
+	const module = `
 	"use strict";
 
 	function test() {
@@ -318,15 +319,15 @@ func TestStrictModule(t *testing.T) {
 
 	vm := js.New()
 
-	registry := NewRegistry(WithGlobalFolders("."), WithLoader(func(name string) ([]byte, error) {
+	registry := require.NewRegistry(require.WithGlobalFolders("."), require.WithLoader(func(name string) ([]byte, error) {
 		if name == "m.js" {
-			return []byte(MODULE), nil
+			return []byte(module), nil
 		}
 		return nil, errors.New("Module does not exist")
 	}))
 	registry.Enable(vm)
 
-	v, err := vm.RunString(SCRIPT)
+	v, err := vm.RunString(script)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +340,7 @@ func TestStrictModule(t *testing.T) {
 func TestResolve(t *testing.T) {
 	testRequire := func(src, fpath string, globalFolders []string, fs map[string]string) (*js.Runtime, js.Value, error) {
 		vm := js.New()
-		r := NewRegistry(WithGlobalFolders(globalFolders...), WithLoader(mapFileSystemSourceLoader(fs)))
+		r := require.NewRegistry(require.WithGlobalFolders(globalFolders...), require.WithLoader(mapFileSystemSourceLoader(fs)))
 		r.Enable(vm)
 		t.Logf("Require(%s)", fpath)
 		ret, err := vm.RunScript(path.Join(src, "test.js"), fmt.Sprintf("require('%s')", fpath))
@@ -418,11 +419,9 @@ func TestResolve(t *testing.T) {
 				t.Errorf("%d: require() failed: %v", i, err)
 			}
 			continue
-		} else {
-			if !tc.ok {
-				t.Errorf("%d: expected to fail, but did not", i)
-				continue
-			}
+		} else if !tc.ok {
+			t.Errorf("%d: expected to fail, but did not", i)
+			continue
 		}
 		f := mod.ToObject(vm).Get(tc.field)
 		if f == nil {
@@ -438,7 +437,7 @@ func TestResolve(t *testing.T) {
 
 func TestRequireCycle(t *testing.T) {
 	vm := js.New()
-	r := NewRegistry(WithLoader(mapFileSystemSourceLoader(map[string]string{
+	r := require.NewRegistry(require.WithLoader(mapFileSystemSourceLoader(map[string]string{
 		"a.js": `var b = require('./b.js'); exports.done = true;`,
 		"b.js": `var a = require('./a.js'); exports.done = true;`,
 	})))
@@ -458,7 +457,7 @@ func TestRequireCycle(t *testing.T) {
 
 func TestErrorPropagation(t *testing.T) {
 	vm := js.New()
-	r := NewRegistry(WithLoader(mapFileSystemSourceLoader(map[string]string{
+	r := require.NewRegistry(require.WithLoader(mapFileSystemSourceLoader(map[string]string{
 		"m.js": `throw 'test passed';`,
 	})))
 	rr := r.Enable(vm)
@@ -466,7 +465,8 @@ func TestErrorPropagation(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected an error")
 	}
-	if ex, ok := err.(*js.Exception); ok {
+	ex := &js.Exception{}
+	if errors.As(err, &ex) {
 		if !ex.Value().StrictEquals(vm.ToValue("test passed")) {
 			t.Fatalf("Unexpected Exception: %v", ex)
 		}
@@ -477,7 +477,7 @@ func TestErrorPropagation(t *testing.T) {
 
 func TestSourceMapLoader(t *testing.T) {
 	vm := js.New()
-	r := NewRegistry(WithLoader(func(p string) ([]byte, error) {
+	r := require.NewRegistry(require.WithLoader(func(p string) ([]byte, error) {
 		switch filepath.ToSlash(p) {
 		case "dir/m.js":
 			return []byte(`throw 'test passed';
@@ -486,7 +486,7 @@ func TestSourceMapLoader(t *testing.T) {
 			return []byte(`{"version":3,"file":"m.js","sourceRoot":"","sources":["m.ts"],"names":[],"mappings":";AAAA"}
 `), nil
 		}
-		return nil, ModuleFileDoesNotExistError
+		return nil, require.ModuleFileDoesNotExistError
 	}))
 
 	rr := r.Enable(vm)
@@ -494,7 +494,8 @@ func TestSourceMapLoader(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected an error")
 	}
-	if ex, ok := err.(*js.Exception); ok {
+	ex := &js.Exception{}
+	if errors.As(err, &ex) {
 		if !ex.Value().StrictEquals(vm.ToValue("test passed")) {
 			t.Fatalf("Unexpected Exception: %v", ex)
 		}
@@ -517,15 +518,12 @@ func TestDefaultModuleLoader(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := teardown(); err != nil {
-			t.Error(err)
+		if teardownErr := teardown(); teardownErr != nil {
+			t.Error(teardownErr)
 		}
 	})
 
-	err = os.Chdir(workdir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(workdir)
 	err = os.Mkdir("module", 0755)
 	if err != nil {
 		t.Fatal(err)
@@ -535,13 +533,14 @@ func TestDefaultModuleLoader(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := js.New()
-	r := NewRegistry()
+	r := require.NewRegistry()
 	rr := r.Enable(vm)
 	_, err = rr.Require("./module")
 	if err == nil {
 		t.Fatal("Expected an error")
 	}
-	if ex, ok := err.(*js.Exception); ok {
+	ex := &js.Exception{}
+	if errors.As(err, &ex) {
 		if !ex.Value().StrictEquals(vm.ToValue("test passed")) {
 			t.Fatalf("Unexpected Exception: %v", ex)
 		}
@@ -556,15 +555,12 @@ func TestDefaultPathResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := teardown(); err != nil {
-			t.Error(err)
+		if teardownErr := teardown(); teardownErr != nil {
+			t.Error(teardownErr)
 		}
 	})
 
-	err = os.Chdir(workdir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(workdir)
 	err = os.Mkdir("node_modules", 0755)
 	if err != nil {
 		t.Fatal(err)
@@ -598,7 +594,7 @@ func TestDefaultPathResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	vm := js.New()
-	r := NewRegistry()
+	r := require.NewRegistry()
 	rr := r.Enable(vm)
 	_, err = rr.Require("a")
 	if err != nil {

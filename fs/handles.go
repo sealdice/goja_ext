@@ -54,8 +54,8 @@ func bindFsFile(instance *moduleInstance, handle *FileHandle) *goja.Object {
 		if err != nil && !errors.Is(err, io.EOF) {
 			panicJSError(rt, err)
 		}
-		if err := writeIntoTypedArray(target, data[:n]); err != nil {
-			panicJSError(rt, err)
+		if werr := writeIntoTypedArray(target, data[:n]); werr != nil {
+			panicJSError(rt, werr)
 		}
 		if n == 0 && errors.Is(err, io.EOF) {
 			return goja.Null()

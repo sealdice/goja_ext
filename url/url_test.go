@@ -1,17 +1,19 @@
-package url
+package url_test
 
 import (
 	_ "embed"
+	"errors"
 	"testing"
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/require"
+	"github.com/sealdice/goja_ext/url"
 )
 
 func TestURL(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	url.Enable(vm)
 
 	if c := vm.Get("URL"); c == nil {
 		t.Fatal("URL not found")
@@ -27,7 +29,7 @@ func TestURL(t *testing.T) {
 func TestGetters(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	url.Enable(vm)
 
 	if c := vm.Get("URL"); c == nil {
 		t.Fatal("URL not found")
@@ -101,7 +103,7 @@ func TestGetters(t *testing.T) {
 func TestURLOriginOmitsOnlyDefaultPort(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	url.Enable(vm)
 
 	v, err := vm.RunString(`JSON.stringify([
 		new URL("http://example.com:80/").origin,
@@ -123,7 +125,7 @@ var urlTest string
 func TestJs(t *testing.T) {
 	vm := goja.New()
 	new(require.Registry).Enable(vm)
-	Enable(vm)
+	url.Enable(vm)
 
 	if c := vm.Get("URL"); c == nil {
 		t.Fatal("URL not found")
@@ -133,7 +135,8 @@ func TestJs(t *testing.T) {
 
 	_, err := vm.RunScript("testdata/url_test.js", urlTest)
 	if err != nil {
-		if ex, ok := err.(*goja.Exception); ok {
+		ex := &goja.Exception{}
+		if errors.As(err, &ex) {
 			t.Fatal(ex.String())
 		}
 		t.Fatal("Failed to process url script.", err)

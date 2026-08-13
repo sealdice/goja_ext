@@ -86,7 +86,7 @@ func effectivePort(value *url.URL) string {
 	}
 }
 
-// WithTimeout sets the default per-request timeout.
+// WithTimeout sets the total request timeout, including response body reads.
 func WithTimeout(d time.Duration) FetchOption {
 	return func(f *fetchConfig) { f.timeout = d }
 }

@@ -126,7 +126,7 @@ func (sp *urlSearchParams) getFirstValue(name string) (string, bool) {
 
 func parseSearchQuery(query string) (ret searchParams) {
 	if query == "" {
-		return
+		return ret
 	}
 
 	query = strings.TrimPrefix(query, "?")
@@ -144,5 +144,5 @@ func parseSearchQuery(query string) (ret searchParams) {
 		}
 	}
 
-	return
+	return ret
 }

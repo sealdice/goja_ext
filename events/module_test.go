@@ -1,10 +1,11 @@
-package events
+package events_test
 
 import (
 	"testing"
 
 	"github.com/dop251/goja"
 	"github.com/sealdice/goja_ext/abort"
+	"github.com/sealdice/goja_ext/events"
 	"github.com/sealdice/goja_ext/require"
 )
 
@@ -13,7 +14,7 @@ func newRT(t *testing.T) *goja.Runtime {
 	rt := goja.New()
 	registry := new(require.Registry)
 	registry.Enable(rt)
-	RegisterWithRegistry(registry)
+	events.RegisterWithRegistry(registry)
 	abort.Enable(rt)
 	return rt
 }

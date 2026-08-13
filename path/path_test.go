@@ -1,4 +1,4 @@
-package path
+package path_test
 
 import (
 	"runtime"

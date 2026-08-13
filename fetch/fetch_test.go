@@ -1,4 +1,4 @@
-package fetch
+package fetch //nolint:testpackage
 
 import (
 	"encoding/json"

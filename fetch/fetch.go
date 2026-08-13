@@ -9,7 +9,7 @@ import (
 	"github.com/sealdice/goja_ext/runtimehost"
 )
 
-// EnableFetch registers the global fetch(input, init) function and EventSource.
+// EnableFetch registers the global fetch(input, init) function.
 // Fetch API behavior is provided by the embedded bare-fetch facade; network I/O
 // is delegated to the Go dispatcher configured by opts.
 func EnableFetch(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...FetchOption) error {
@@ -39,5 +39,5 @@ func EnableFetch(rt *goja.Runtime, loop *eventloop.EventLoop, opts ...FetchOptio
 	if err := rt.Set("fetch", fetchValue); err != nil {
 		return err
 	}
-	return rt.Set("EventSource", newEventSourceCtor(rt, loop, client))
+	return nil
 }

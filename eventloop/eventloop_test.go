@@ -1,4 +1,4 @@
-package eventloop
+package eventloop //nolint:testpackage
 
 import (
 	"fmt"
@@ -57,7 +57,7 @@ func TestTimerHandlesSupportRefAndUnref(t *testing.T) {
 
 func TestRun(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	var calledAt;
 	setTimeout(function() {
 		calledAt = now();
@@ -65,7 +65,7 @@ func TestRun(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,14 +97,14 @@ func TestRun(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	var calledAt;
 	setTimeout(function() {
 		calledAt = now();
 	}, 1000);
 	`
 
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,14 +146,14 @@ func TestStart(t *testing.T) {
 
 func TestStartInForeground(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	var calledAt;
 	setTimeout(function() {
 		calledAt = now();
 	}, 1000);
 	`
 
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestStartInForeground(t *testing.T) {
 
 func TestInterval(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	var count = 0;
 	var t = setInterval(function(times) {
 		console.log("tick");
@@ -207,7 +207,7 @@ func TestInterval(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestInterval(t *testing.T) {
 
 func TestImmediate(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	let log = [];
 	function cb(arg) {
 		log.push(arg);
@@ -248,7 +248,7 @@ func TestImmediate(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,12 +288,12 @@ func TestRunNoSchedule(t *testing.T) {
 }
 
 func TestRunWithConsole(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	console.log("Started");
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestRunWithConsole(t *testing.T) {
 	}
 
 	loop = NewEventLoop(EnableConsole(true))
-	prg, err = goja.Compile("main.js", SCRIPT, false)
+	prg, err = goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,12 +318,12 @@ func TestRunWithConsole(t *testing.T) {
 }
 
 func TestRunNoConsole(t *testing.T) {
-	const SCRIPT = `
+	const script = `
 	console.log("Started");
 	`
 
 	loop := NewEventLoop(EnableConsole(false))
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestRunNoConsole(t *testing.T) {
 
 func TestClearIntervalRace(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	console.log("calling setInterval");
 	var t = setInterval(function() {
 		console.log("tick");
@@ -349,7 +349,7 @@ func TestClearIntervalRace(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func TestRunOnStoppedLoop(t *testing.T) {
 
 func TestPromise(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	let result;
 	const p = new Promise((resolve, reject) => {
 		setTimeout(() => {resolve("passed")}, 500);
@@ -538,7 +538,7 @@ func TestPromise(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestPromise(t *testing.T) {
 
 func TestPromiseNative(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	let result;
 	p.then(value => {
 		result = value;
@@ -570,7 +570,7 @@ func TestPromiseNative(t *testing.T) {
 	`
 
 	loop := NewEventLoop()
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestEventLoop_StopNoWait(t *testing.T) {
 
 func TestEventLoop_ClearRunningTimeout(t *testing.T) {
 	t.Parallel()
-	const SCRIPT = `
+	const script = `
 	var called = 0;
 	let aTimer;
 	function a() {
@@ -658,7 +658,7 @@ func TestEventLoop_ClearRunningTimeout(t *testing.T) {
 	}
 	a();`
 
-	prg, err := goja.Compile("main.js", SCRIPT, false)
+	prg, err := goja.Compile("main.js", script, false)
 	if err != nil {
 		t.Fatal(err)
 	}

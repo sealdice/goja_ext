@@ -1,11 +1,42 @@
 const Headers = require('bare-fetch/headers')
 const Body = require('bare-fetch/body')
-const Request = require('bare-fetch/request')
+const BareRequest = require('bare-fetch/request')
 const Response = require('bare-fetch/response')
 const FetchError = require('bare-fetch/errors')
 const formData = require('bare-form-data')
+const { isReadableStream } = require('bare-stream/web')
 
 const { FormData, Blob, File } = formData
+const requestBodyKinds = new WeakMap()
+
+class Request extends BareRequest {
+  constructor(input, init = {}) {
+    if (init.duplex !== undefined && init.duplex !== 'half') {
+      throw new TypeError("Request duplex must be 'half'")
+    }
+
+    let bodyKind = null
+    if (init.body !== undefined) {
+      bodyKind = isReadableStream(init.body) ? 'stream' : 'static'
+    } else if (input && requestBodyKinds.has(input)) {
+      bodyKind = requestBodyKinds.get(input)
+    } else if (input && typeof input === 'object') {
+      bodyKind = isReadableStream(input.body) ? 'stream' : 'static'
+    }
+
+    super(input, init)
+    requestBodyKinds.set(this, bodyKind || 'static')
+  }
+
+  clone() {
+    if (Body.isUnusable(this)) {
+      throw FetchError.BODY_UNUSABLE('Body has already been consumed')
+    }
+    const cloned = new Request(this, { body: Body.clone(this) })
+    requestBodyKinds.set(cloned, requestBodyKinds.get(this))
+    return cloned
+  }
+}
 
 const cloneResponse = Response.prototype.clone
 Response.prototype.clone = function clone() {
@@ -56,9 +87,11 @@ function createFetch(host) {
 
     async function send(request) {
       const signal = request.signal
+      validateSignal(signal)
       if (signal && signal.aborted) throw signal.reason
 
-      const body = await readBody(request, signal)
+      const bodyStream = requestBodyKinds.get(request) === 'stream' ? request.body : null
+      const body = bodyStream === null ? await readBody(request, signal) : null
       if (signal && signal.aborted) throw signal.reason
 
       if (!request.headers.has('user-agent')) {
@@ -73,6 +106,7 @@ function createFetch(host) {
           method: request.method,
           headers: Array.from(request.headers),
           body,
+          bodyStream,
           signal
         })
       } catch (err) {
@@ -89,6 +123,16 @@ function createFetch(host) {
       response._urls = raw.urls.map((url) => new URL(url))
       return response
     }
+  }
+}
+
+function validateSignal(signal) {
+  if (signal === null) return
+  if (typeof signal.aborted !== 'boolean') {
+    throw new TypeError('signal.aborted must be a boolean')
+  }
+  if (typeof signal.addEventListener !== 'function') {
+    throw new TypeError('signal.addEventListener must be callable')
   }
 }
 

@@ -324,7 +324,8 @@ func valueOrUndefined(value goja.Value) goja.Value {
 }
 
 func errorValue(rt *goja.Runtime, err error) goja.Value {
-	if exception, ok := err.(*goja.Exception); ok {
+	exception := &goja.Exception{}
+	if errors.As(err, &exception) {
 		return exception.Value()
 	}
 	return rt.NewGoError(err)

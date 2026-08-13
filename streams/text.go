@@ -9,6 +9,8 @@ import (
 )
 
 var textExportNames = [...]string{
+	"TextEncoder",
+	"TextDecoder",
 	"TextEncoderStream",
 	"TextDecoderStream",
 }
@@ -86,7 +88,7 @@ func decodeInputBytes(rt *goja.Runtime, value goja.Value) []byte {
 			}
 		}
 	}
-	panic(rt.NewTypeError("TextDecoderStream input must be an ArrayBuffer or ArrayBufferView"))
+	panic(rt.NewTypeError("TextDecoder input must be an ArrayBuffer or ArrayBufferView"))
 }
 
 func uint8Array(rt *goja.Runtime, data []byte) *goja.Object {

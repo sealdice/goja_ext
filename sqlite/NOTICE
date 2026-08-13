@@ -1,0 +1,8 @@
+The JavaScript facade in facade.js is adapted from holepunchto/bare-sqlite,
+including its DatabaseSync, StatementSync, TagStore, and SQLiteError API
+organization. The original project is distributed under the Apache License,
+Version 2.0:
+
+https://github.com/holepunchto/bare-sqlite
+
+The Goja binding and Afero VFS in this directory are original goja_ext code.
