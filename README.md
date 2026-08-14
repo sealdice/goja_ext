@@ -50,6 +50,7 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 | util | require("util") | format、inspect、循环引用检测和深度控制 | 只覆盖项目需要的占位符和 inspect 选项，不保证与 Node 输出逐字符一致 |
 | structuredclone | require("structuredclone")；global: structuredClone | 复制数组、对象、Map、Set、Date、RegExp、ArrayBuffer、TypedArray 和循环引用 | 不支持函数、Symbol、WeakMap、WeakSet、Promise 及未知宿主对象，会抛 DataCloneError |
 | websocket | global: WebSocket | WebSocket 客户端、事件监听、文本消息、协议、关闭和连接管理 | 不是 require core module；底层是 Gorilla WebSocket，主要覆盖客户端基础生命周期，必须有 event loop |
+| cloudflarekv | global: KVNamespace、KV、SyncKV | Cloudflare Workers KV 兼容的 get/put/delete/list、metadata、过期时间、Web Stream | 不是 require core module；存储后端由 Go 宿主实现 store.NamespaceStore 注入；同步绑定（SyncKV）不支持 ReadableStream |
 
 ### 常用 JavaScript 写法
 
@@ -283,6 +284,86 @@ if err := websocket.Enable(rt, loop); err != nil {
     return err
 }
 ~~~
+
+### 接入 Cloudflare KV 兼容绑定
+
+cloudflarekv 提供一个 Cloudflare Workers KV 风格的 JS 接口，存储后端由 Go
+宿主实现 `store.NamespaceStore` 注入，桥接层负责 JS 值与存储记录之间的转换
+（字符串/JSON/ArrayBuffer/ReadableStream、metadata、过期时间、list 分页）。
+
+`NamespaceStore` 是存储适配器需要实现的唯一接口：
+
+~~~go
+type NamespaceStore interface {
+    Put(ctx context.Context, key string, value []byte, options store.PutOptions) error
+    Get(ctx context.Context, key string) (store.Record, bool, error)
+    Delete(ctx context.Context, key string) error
+    List(ctx context.Context, options store.ListOptions) (store.ListResult, error)
+}
+~~~
+
+绑定方式有三种：
+
+- `BindNamespace`：将指定的 store 以 Promise API 绑定为全局对象（如 KV）；
+- `BindSyncNamespace`：将指定的 store 以同步 API 绑定为全局对象（如 SyncKV），
+  便于测试或脚本场景；
+- `InstallConstructor`：安装 `KVNamespace` 构造器，由 resolver 按 namespace
+  名称解析对应的 store，模拟 Workers 的多命名空间绑定。
+
+~~~go
+kv := myBackendStore // 实现 store.NamespaceStore
+
+// 异步 API（Promise），需要 event loop：
+if err := cloudflarekv.BindNamespace(rt, loop, "KV", kv); err != nil {
+    return err
+}
+
+// 同步 API（无 Promise，不需要 event loop）：
+if err := cloudflarekv.BindSyncNamespace(rt, "SyncKV", kv); err != nil {
+    return err
+}
+
+// 多命名空间构造器：
+resolver := func(namespace string) (store.NamespaceStore, error) {
+    switch namespace {
+    case "prod":
+        return prodStore, nil
+    case "staging":
+        return stagingStore, nil
+    }
+    return nil, fmt.Errorf("unknown namespace %q", namespace)
+}
+if err := cloudflarekv.InstallConstructor(rt, loop, resolver); err != nil {
+    return err
+}
+~~~
+
+JS 侧的用法与 Cloudflare Workers KV 保持一致：get 支持
+`"text"`（默认）、`"json"`、`"arrayBuffer"`、`"stream"` 四种取值类型，
+put 支持 `expiration` / `expirationTtl` / `metadata` 选项，list 返回
+`keys`、`list_complete` 与可选 `cursor` 用于分页：
+
+~~~javascript
+await KV.put("user:1", JSON.stringify({ name: "Ada" }), {
+  expirationTtl: 3600,
+  metadata: { role: "admin" },
+});
+
+const value = await KV.get("user:1", "json");        // { name: "Ada" }
+const binary = await KV.get("logo.png", "arrayBuffer");
+const stream = await KV.get("logs.txt", "stream");   // ReadableStream
+
+const page = await KV.list({ prefix: "user:", limit: 100 });
+for (const key of page.keys) {
+  console.log(key.name, key.metadata, key.expiration);
+}
+
+await KV.delete("user:1");
+~~~
+
+`SyncKV` 提供相同的同步方法（get/getWithMetadata/put/delete/list），但
+`get(..., "stream")` 与 ReadableStream 写入不受支持，会直接抛出异常。
+`getWithMetadata` 在键不存在时返回 `{ value: null, metadata: null }`。
 
 Fetch 的 WithTimeout、WithProxy、WithHTTPClient、WithTransport 和 WithRestyClient
 只影响 Go 侧 HTTP 执行器，不会暴露为 JavaScript 全局属性。WithTimeout 对应 Go
