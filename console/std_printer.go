@@ -1,19 +1,14 @@
 package console
 
 import (
-	"log"
+	"fmt"
 	"os"
 )
 
-var (
-	stderrLogger = log.Default() // the default logger output to stderr
-	stdoutLogger = log.New(os.Stdout, "", log.LstdFlags)
-
-	defaultStdPrinter Printer = &StdPrinter{
-		StdoutPrint: func(s string) { stdoutLogger.Print(s) },
-		StderrPrint: func(s string) { stderrLogger.Print(s) },
-	}
-)
+var defaultStdPrinter Printer = &StdPrinter{
+	StdoutPrint: func(s string) { _, _ = fmt.Fprintln(os.Stdout, s) },
+	StderrPrint: func(s string) { _, _ = fmt.Fprintln(os.Stderr, s) },
+}
 
 // StdPrinter implements the console.Printer interface
 // that prints to the stdout or stderr.
