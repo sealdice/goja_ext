@@ -312,11 +312,13 @@ type NamespaceStore interface {
 }
 ~~~
 
-绑定方式有三种：
+绑定方式有五种：
 
 - `BindNamespace`：将指定的 store 以 Promise API 绑定为全局对象（如 KV）；
 - `BindSyncNamespace`：将指定的 store 以同步 API 绑定为全局对象（如 SyncKV），
   便于测试或脚本场景；
+- `BindNamespaceObject`：将 Promise API 安装到已有 JS 对象，不创建全局变量；
+- `BindSyncNamespaceObject`：将同步 API 安装到已有 JS 对象，不创建全局变量；
 - `InstallConstructor`：安装 `KVNamespace` 构造器，由 resolver 按 namespace
   名称解析对应的 store，模拟 Workers 的多命名空间绑定。
 
@@ -330,6 +332,23 @@ if err := cloudflarekv.BindNamespace(rt, loop, "KV", kv); err != nil {
 
 // 同步 API（无 Promise，不需要 event loop）：
 if err := cloudflarekv.BindSyncNamespace(rt, "SyncKV", kv); err != nil {
+    return err
+}
+
+// 安装到已有对象，适用于 storage.kv / storage.synckv 等嵌套绑定：
+storage := rt.NewObject()
+asyncObject := rt.NewObject()
+if err := cloudflarekv.BindNamespaceObject(rt, loop, asyncObject, kv); err != nil {
+    return err
+}
+syncObject := rt.NewObject()
+if err := cloudflarekv.BindSyncNamespaceObject(rt, syncObject, kv); err != nil {
+    return err
+}
+if err := storage.Set("kv", asyncObject); err != nil {
+    return err
+}
+if err := storage.Set("synckv", syncObject); err != nil {
     return err
 }
 

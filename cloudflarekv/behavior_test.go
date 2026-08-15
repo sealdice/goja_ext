@@ -442,6 +442,39 @@ func TestBindNamespaceValidation(t *testing.T) {
 	}
 }
 
+func TestBindNamespaceObjectValidation(t *testing.T) {
+	loop := eventloop.NewEventLoop()
+	loop.Start()
+	defer loop.Stop()
+
+	mem := newMemStore()
+	vm := goja.New()
+	target := vm.NewObject()
+
+	tests := []struct {
+		name string
+		bind func() error
+		want string
+	}{
+		{"async nil runtime", func() error { return cloudflarekv.BindNamespaceObject(nil, loop, target, mem) }, "runtime is required"},
+		{"async nil loop", func() error { return cloudflarekv.BindNamespaceObject(vm, nil, target, mem) }, "event loop is required"},
+		{"async nil target", func() error { return cloudflarekv.BindNamespaceObject(vm, loop, nil, mem) }, "target is required"},
+		{"async nil store", func() error { return cloudflarekv.BindNamespaceObject(vm, loop, target, nil) }, "store is required"},
+		{"sync nil runtime", func() error { return cloudflarekv.BindSyncNamespaceObject(nil, target, mem) }, "runtime is required"},
+		{"sync nil target", func() error { return cloudflarekv.BindSyncNamespaceObject(vm, nil, mem) }, "target is required"},
+		{"sync nil store", func() error { return cloudflarekv.BindSyncNamespaceObject(vm, target, nil) }, "store is required"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.bind()
+			if err == nil || err.Error() != test.want {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestPutClassifiesJSONStrings(t *testing.T) {
 	loop := eventloop.NewEventLoop()
 	loop.Start()
