@@ -61,10 +61,28 @@ func BindNamespace(vm *goja.Runtime, loop *eventloop.EventLoop, bindingName stri
 	}
 
 	object := vm.NewObject()
-	if err := bindObject(vm, loop, object, ns); err != nil {
+	if err := BindNamespaceObject(vm, loop, object, ns); err != nil {
 		return err
 	}
 	return vm.Set(bindingName, object)
+}
+
+// BindNamespaceObject installs the asynchronous KV API on an existing object.
+func BindNamespaceObject(vm *goja.Runtime, loop *eventloop.EventLoop, target *goja.Object, ns store.NamespaceStore) error {
+	if vm == nil {
+		return errors.New("runtime is required")
+	}
+	if loop == nil {
+		return errors.New("event loop is required")
+	}
+	if target == nil {
+		return errors.New("target is required")
+	}
+	if ns == nil {
+		return errors.New("store is required")
+	}
+
+	return bindObject(vm, loop, target, ns)
 }
 
 func BindSyncNamespace(vm *goja.Runtime, bindingName string, ns store.NamespaceStore) error {
@@ -79,10 +97,25 @@ func BindSyncNamespace(vm *goja.Runtime, bindingName string, ns store.NamespaceS
 	}
 
 	object := vm.NewObject()
-	if err := bindSyncObject(vm, object, ns); err != nil {
+	if err := BindSyncNamespaceObject(vm, object, ns); err != nil {
 		return err
 	}
 	return vm.Set(bindingName, object)
+}
+
+// BindSyncNamespaceObject installs the synchronous KV API on an existing object.
+func BindSyncNamespaceObject(vm *goja.Runtime, target *goja.Object, ns store.NamespaceStore) error {
+	if vm == nil {
+		return errors.New("runtime is required")
+	}
+	if target == nil {
+		return errors.New("target is required")
+	}
+	if ns == nil {
+		return errors.New("store is required")
+	}
+
+	return bindSyncObject(vm, target, ns)
 }
 
 func bindObject(vm *goja.Runtime, loop *eventloop.EventLoop, object *goja.Object, ns store.NamespaceStore) error {
