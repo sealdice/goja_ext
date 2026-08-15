@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/fs"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/fs"
+	"github.com/dop251/goja_nodejs/require"
 	"github.com/spf13/afero"
 )
 

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/cloudflarekv/store"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/cloudflarekv/store"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/streams"
 )
 
 const readableStreamChunkSize = 64 * 1024

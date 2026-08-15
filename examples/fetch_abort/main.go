@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/abort"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/fetch"
+	"github.com/dop251/goja_nodejs/abort"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/fetch"
 )
 
 func main() {

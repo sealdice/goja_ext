@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/streams"
-	_ "github.com/sealdice/goja_ext/streams/node"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/streams"
+	_ "github.com/dop251/goja_nodejs/streams/node"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/fs"
+	"github.com/dop251/goja_nodejs/fs"
 	"github.com/spf13/afero"
 )
 

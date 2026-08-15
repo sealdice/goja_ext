@@ -25,7 +25,7 @@
 ```go
 import (
     "github.com/dop251/goja"
-    "github.com/sealdice/goja_ext/abort"
+    "github.com/dop251/goja_nodejs/abort"
 )
 
 rt := goja.New()

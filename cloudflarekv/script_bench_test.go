@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/cloudflarekv"
-	"github.com/sealdice/goja_ext/eventloop"
+	"github.com/dop251/goja_nodejs/cloudflarekv"
+	"github.com/dop251/goja_nodejs/eventloop"
 )
 
 func BenchmarkSyncKVScript(b *testing.B) {

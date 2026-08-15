@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/streams"
 )
 
 func TestGoReadableStreamSourceAndConsumer(t *testing.T) {

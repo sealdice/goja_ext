@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/gorilla/websocket"
-	"github.com/sealdice/goja_ext/eventloop"
 )
 
 type recordingDialer struct {

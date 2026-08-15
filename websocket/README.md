@@ -11,8 +11,8 @@ JavaScript 事件回调通过事件循环线程派发。
 ```go
 import (
     "github.com/dop251/goja"
-    "github.com/sealdice/goja_ext/eventloop"
-    "github.com/sealdice/goja_ext/websocket"
+    "github.com/dop251/goja_nodejs/eventloop"
+    "github.com/dop251/goja_nodejs/websocket"
 )
 
 rt := goja.New()

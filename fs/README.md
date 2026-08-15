@@ -29,8 +29,8 @@ Afero-backed 文件系统模块，同时提供 **Deno 风格**与 **Node.js 风�
 
 ```go
 import (
-    "github.com/sealdice/goja_ext/fs/extra"
-    _ "github.com/sealdice/goja_ext/streams/node" // 仅在需要 Node 文件流时
+    "github.com/dop251/goja_nodejs/fs/extra"
+    _ "github.com/dop251/goja_nodejs/streams/node" // 仅在需要 Node 文件流时
 )
 
 backend := afero.NewOsFs()
