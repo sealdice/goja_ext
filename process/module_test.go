@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/process"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/process"
+	"github.com/dop251/goja_nodejs/require"
 )
 
 func TestProcessEnvStructure(t *testing.T) {

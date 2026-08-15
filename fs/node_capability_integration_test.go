@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	rootfs "github.com/sealdice/goja_ext/fs"
-	"github.com/sealdice/goja_ext/fs/extra"
-	"github.com/sealdice/goja_ext/require"
+	rootfs "github.com/dop251/goja_nodejs/fs"
+	"github.com/dop251/goja_nodejs/fs/extra"
+	"github.com/dop251/goja_nodejs/require"
 	"github.com/spf13/afero"
 )
 

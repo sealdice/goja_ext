@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/abort"
-	"github.com/sealdice/goja_ext/events"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/abort"
+	"github.com/dop251/goja_nodejs/events"
+	"github.com/dop251/goja_nodejs/require"
 )
 
 func newRT(t *testing.T) *goja.Runtime {

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/buffer"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/buffer"
+	"github.com/dop251/goja_nodejs/streams"
 	"github.com/spf13/afero"
 )
 

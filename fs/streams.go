@@ -5,7 +5,7 @@ import (
 	"io"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/streams"
 )
 
 func newFileReadableStream(instance *moduleInstance, handle *FileHandle) goja.Value {

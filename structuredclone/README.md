@@ -26,7 +26,7 @@
 ```go
 import (
     "github.com/dop251/goja"
-    "github.com/sealdice/goja_ext/structuredclone"
+    "github.com/dop251/goja_nodejs/structuredclone"
 )
 
 rt := goja.New()

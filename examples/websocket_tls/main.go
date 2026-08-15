@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
+	jswebsocket "github.com/dop251/goja_nodejs/websocket"
 	"github.com/gorilla/websocket"
-	"github.com/sealdice/goja_ext/eventloop"
-	jswebsocket "github.com/sealdice/goja_ext/websocket"
 )
 
 func main() {

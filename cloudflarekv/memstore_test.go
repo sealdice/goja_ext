@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sealdice/goja_ext/cloudflarekv/store"
+	"github.com/dop251/goja_nodejs/cloudflarekv/store"
 )
 
 // memStore is an in-memory store.NamespaceStore used by the bridge tests.

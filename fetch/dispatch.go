@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/runtimehost"
 	"github.com/go-resty/resty/v2"
-	"github.com/sealdice/goja_ext/runtimehost"
 )
 
 type dispatchRequest struct {

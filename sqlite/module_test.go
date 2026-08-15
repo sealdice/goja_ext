@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/fs"
-	"github.com/sealdice/goja_ext/require"
-	"github.com/sealdice/goja_ext/sqlite"
+	"github.com/dop251/goja_nodejs/fs"
+	"github.com/dop251/goja_nodejs/require"
+	"github.com/dop251/goja_nodejs/sqlite"
 	"github.com/spf13/afero"
 )
 

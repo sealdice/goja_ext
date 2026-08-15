@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/runtimehost"
+	"github.com/dop251/goja_nodejs/runtimehost"
 
 	"go.uber.org/goleak"
 )

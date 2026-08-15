@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/runtimehost"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/runtimehost"
 )
 
 // EnableFetch registers the global fetch(input, init) function.

@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	js "github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/require"
 )
 
 func mapFileSystemSourceLoader(files map[string]string) require.SourceLoader {

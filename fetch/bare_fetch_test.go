@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/abort"
-	"github.com/sealdice/goja_ext/require"
-	weburl "github.com/sealdice/goja_ext/url"
+	"github.com/dop251/goja_nodejs/abort"
+	"github.com/dop251/goja_nodejs/require"
+	weburl "github.com/dop251/goja_nodejs/url"
 )
 
 func TestHeadersGetMissingReturnsNull(t *testing.T) {

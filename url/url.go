@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/errors"
+	"github.com/dop251/goja_nodejs/errors"
 
 	"golang.org/x/net/idna"
 )
