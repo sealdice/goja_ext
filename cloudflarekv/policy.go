@@ -2,6 +2,7 @@ package cloudflarekv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -120,7 +121,7 @@ func (state *bindingState) validateKey(key string) error {
 func (state *bindingState) validateKeys(keys []string, bulk bool) error {
 	if bulk {
 		if len(keys) == 0 {
-			return fmt.Errorf("bulk get requires at least one key")
+			return errors.New("bulk get requires at least one key")
 		}
 		if maximum := state.config.limits.MaxBulkKeys; maximum > 0 && len(keys) > maximum {
 			return fmt.Errorf("bulk get accepts at most %d keys", maximum)
@@ -168,7 +169,7 @@ func (state *bindingState) validateListOptions(options *store.ListOptions) error
 		options.Limit = maximum
 	}
 	if options.Limit < 0 {
-		return fmt.Errorf("list limit must be positive")
+		return errors.New("list limit must be positive")
 	}
 	if maximum > 0 && options.Limit > maximum {
 		return fmt.Errorf("list limit cannot exceed %d", maximum)
@@ -186,7 +187,7 @@ func (state *bindingState) beginWrite(key string) error {
 	defer state.mu.Unlock()
 	if previous, found := state.last[key]; found && now.Sub(previous) < interval {
 		if interval == time.Second {
-			return fmt.Errorf("KV permits only one write to a key every 1 second")
+			return errors.New("KV permits only one write to a key every 1 second")
 		}
 		return fmt.Errorf("KV permits only one write to a key every %s", interval)
 	}

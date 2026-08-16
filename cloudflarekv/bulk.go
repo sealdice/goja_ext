@@ -139,7 +139,7 @@ func getManyPromise(
 		}
 		set, ok := goja.AssertFunction(result.Get("set"))
 		if !ok {
-			return nil, errors.New("Map.set is not callable")
+			return nil, errors.New("map.set is not callable")
 		}
 		for _, key := range keys {
 			record, found := records[key]
@@ -155,7 +155,7 @@ func getManyPromise(
 			if withMetadata {
 				entry := vm.NewObject()
 				_ = entry.Set("value", value)
-				metadata := goja.Value(goja.Null())
+				metadata := goja.Null()
 				if found {
 					metadata, err = metadataToValue(vm, record.Metadata)
 					if err != nil {

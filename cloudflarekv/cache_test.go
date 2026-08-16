@@ -41,7 +41,7 @@ func TestBindingCachesPresentAndMissingValues(t *testing.T) {
 			defer loop.Stop()
 			backend := &countingStore{memStore: newMemStore()}
 			if found {
-				_ = backend.Put(context.Background(), "key", []byte("value"), store.PutOptions{})
+				_ = backend.Put(t.Context(), "key", []byte("value"), store.PutOptions{})
 			}
 
 			runScript(t, loop, func(vm *goja.Runtime) error {
@@ -65,7 +65,7 @@ func TestBindingCacheCanBeDisabledAndRejectsShortCacheTTL(t *testing.T) {
 	loop.Start()
 	defer loop.Stop()
 	backend := &countingStore{memStore: newMemStore()}
-	_ = backend.Put(context.Background(), "key", []byte("value"), store.PutOptions{})
+	_ = backend.Put(t.Context(), "key", []byte("value"), store.PutOptions{})
 
 	result := runScript(t, loop, func(vm *goja.Runtime) error {
 		if err := cloudflarekv.BindNamespace(vm, loop, "KV", backend, cloudflarekv.WithCacheCapacity(0)); err != nil {
@@ -96,7 +96,7 @@ func TestPutInvalidatesBindingCache(t *testing.T) {
 	loop.Start()
 	defer loop.Stop()
 	backend := &countingStore{memStore: newMemStore()}
-	_ = backend.Put(context.Background(), "key", []byte("old"), store.PutOptions{})
+	_ = backend.Put(t.Context(), "key", []byte("old"), store.PutOptions{})
 
 	result := runScript(t, loop, func(vm *goja.Runtime) error {
 		if err := cloudflarekv.BindNamespace(vm, loop, "KV", backend); err != nil {

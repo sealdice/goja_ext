@@ -41,10 +41,10 @@ func TestBulkGetUsesCapabilityAndReturnsMap(t *testing.T) {
 	defer loop.Stop()
 
 	backend := &bulkStore{memStore: newMemStore()}
-	if err := backend.Put(context.Background(), "a", []byte("A"), store.PutOptions{}); err != nil {
+	if err := backend.Put(t.Context(), "a", []byte("A"), store.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := backend.Put(context.Background(), "b", []byte("B"), store.PutOptions{}); err != nil {
+	if err := backend.Put(t.Context(), "b", []byte("B"), store.PutOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestBulkGetWithMetadataReturnsMapEntries(t *testing.T) {
 	defer loop.Stop()
 
 	backend := &bulkStore{memStore: newMemStore()}
-	if err := backend.Put(context.Background(), "a", []byte(`{"ok":true}`), store.PutOptions{
+	if err := backend.Put(t.Context(), "a", []byte(`{"ok":true}`), store.PutOptions{
 		Metadata: map[string]any{"source": "bulk"},
 	}); err != nil {
 		t.Fatal(err)

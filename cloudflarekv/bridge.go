@@ -127,8 +127,8 @@ func bindObject(vm *goja.Runtime, loop *eventloop.EventLoop, object *goja.Object
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		if err := state.validateKeys(keys, bulk); err != nil {
-			return rejectedPromise(vm, err)
+		if validationErr := state.validateKeys(keys, bulk); validationErr != nil {
+			return rejectedPromise(vm, validationErr)
 		}
 		getOptions, err := parseGetOptions(vm, call.Argument(1))
 		if err != nil {
@@ -176,8 +176,8 @@ func bindObject(vm *goja.Runtime, loop *eventloop.EventLoop, object *goja.Object
 		if err != nil {
 			return rejectedPromise(vm, err)
 		}
-		if err := state.validateKeys(keys, bulk); err != nil {
-			return rejectedPromise(vm, err)
+		if validationErr := state.validateKeys(keys, bulk); validationErr != nil {
+			return rejectedPromise(vm, validationErr)
 		}
 		getOptions, err := parseGetOptions(vm, call.Argument(1))
 		if err != nil {
@@ -207,8 +207,8 @@ func bindObject(vm *goja.Runtime, loop *eventloop.EventLoop, object *goja.Object
 				return result, nil
 			}
 			if payload.streamRecord == nil {
-				if err := state.validateValueSize(int64(len(payload.record.Value))); err != nil {
-					return nil, err
+				if validationErr := state.validateValueSize(int64(len(payload.record.Value))); validationErr != nil {
+					return nil, validationErr
 				}
 			}
 
@@ -359,8 +359,8 @@ func bindSyncObject(vm *goja.Runtime, object *goja.Object, state *bindingState) 
 		if !found {
 			return goja.Null()
 		}
-		if err := state.validateValueSize(int64(len(record.Value))); err != nil {
-			panic(jsErrorValue(vm, err))
+		if validationErr := state.validateValueSize(int64(len(record.Value))); validationErr != nil {
+			panic(jsErrorValue(vm, validationErr))
 		}
 		if valueType == "stream" {
 			panic(jsErrorValue(vm, errors.New(`SyncKV.get(..., "stream") is not supported; use async KV.get(..., "stream") instead`)))
@@ -401,8 +401,8 @@ func bindSyncObject(vm *goja.Runtime, object *goja.Object, state *bindingState) 
 			_ = result.Set("metadata", goja.Null())
 			return result
 		}
-		if err := state.validateValueSize(int64(len(record.Value))); err != nil {
-			panic(jsErrorValue(vm, err))
+		if validationErr := state.validateValueSize(int64(len(record.Value))); validationErr != nil {
+			panic(jsErrorValue(vm, validationErr))
 		}
 		if valueType == "stream" {
 			panic(jsErrorValue(vm, errors.New(`SyncKV.getWithMetadata(..., "stream") is not supported; use async KV.getWithMetadata(..., "stream") instead`)))
@@ -480,8 +480,8 @@ func bindSyncObject(vm *goja.Runtime, object *goja.Object, state *bindingState) 
 		if err != nil {
 			panic(jsErrorValue(vm, err))
 		}
-		if err := state.validateListOptions(&options); err != nil {
-			panic(jsErrorValue(vm, err))
+		if validationErr := state.validateListOptions(&options); validationErr != nil {
+			panic(jsErrorValue(vm, validationErr))
 		}
 
 		result, err := state.ns.List(context.Background(), options)
@@ -555,9 +555,7 @@ func parseGetOptions(vm *goja.Runtime, argument goja.Value) (getOptions, error) 
 	typeValue := object.Get("type")
 	valueType := "text"
 	var err error
-	if isNilish(typeValue) {
-		valueType = "text"
-	} else {
+	if !isNilish(typeValue) {
 		exported, ok := typeValue.Export().(string)
 		if !ok {
 			return getOptions{}, errors.New("type option must be a string")

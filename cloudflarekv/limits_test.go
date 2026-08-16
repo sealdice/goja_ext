@@ -2,7 +2,6 @@ package cloudflarekv_test
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -150,7 +149,7 @@ func TestWriteRateLimitCanBeDisabledByGoHost(t *testing.T) {
 func TestGoStoreCallsBypassBindingLimits(t *testing.T) {
 	backend := newMemStore()
 	value := make([]byte, 25*1024*1024+1)
-	if err := backend.Put(context.Background(), strings.Repeat("k", 513), value, store.PutOptions{
+	if err := backend.Put(t.Context(), strings.Repeat("k", 513), value, store.PutOptions{
 		ExpirationTTL: time.Second,
 	}); err != nil {
 		t.Fatalf("direct store put was limited: %v", err)

@@ -141,7 +141,7 @@ func streamRecordToReadableStream(
 		_ = record.Body.Close()
 		return nil, fmt.Errorf("KV value exceeds the maximum size of %d bytes", maximumBytes)
 	}
-	body := io.ReadCloser(record.Body)
+	body := record.Body
 	if maximumBytes > 0 {
 		body = &maximumReadCloser{
 			maximumReader: &maximumReader{reader: record.Body, remaining: maximumBytes, maximum: maximumBytes},
