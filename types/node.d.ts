@@ -48,51 +48,6 @@ declare module "process" {
   export = process;
 }
 
-declare module "stream" {
-  import { EventEmitter } from "events";
-  export type Callback = (error?: Error | null, value?: unknown) => void;
-  export interface ReadableOptions { read?(this: Readable, callback?: Callback): void; }
-  export interface WritableOptions { write?(this: Writable, chunk: unknown, callback: Callback): void; final?(this: Writable, callback: Callback): void; }
-  export interface TransformOptions extends ReadableOptions, WritableOptions { transform?(this: Transform, chunk: unknown, encoding: string, callback: Callback): void; }
-  export class Stream extends EventEmitter { pipe<T extends Writable>(destination: T): T; destroy(error?: unknown): this; }
-  export class Readable extends Stream implements AsyncIterable<unknown> {
-    constructor(options?: ReadableOptions);
-    readonly readable: boolean;
-    readonly destroyed: boolean;
-    push(chunk: unknown): boolean;
-    read(size?: number): unknown;
-    setEncoding(encoding: string): this;
-    [Symbol.asyncIterator](): AsyncIterator<unknown>;
-    static from(source: Iterable<unknown> | AsyncIterable<unknown>, options?: ReadableOptions): Readable;
-    static toWeb(stream: Readable | Duplex): ReadableStream<unknown> | { readable: ReadableStream<unknown>; writable: WritableStream<unknown> };
-    static fromWeb(stream: ReadableStream<unknown> | { readable: ReadableStream<unknown>; writable: WritableStream<unknown> }, options?: ReadableOptions & { signal?: AbortSignal; encoding?: string }): Readable | Duplex;
-  }
-  export class Writable extends Stream {
-    constructor(options?: WritableOptions);
-    readonly writable: boolean;
-    write(chunk: unknown, callback?: Callback): boolean;
-    end(chunk?: unknown, callback?: Callback): this;
-    static toWeb(stream: Writable): WritableStream<unknown>;
-    static fromWeb(stream: WritableStream<unknown>, options?: WritableOptions & { signal?: AbortSignal }): Writable;
-  }
-  export class Duplex extends Readable {
-    readonly writable: boolean;
-    write(chunk: unknown, callback?: Callback): boolean;
-    end(chunk?: unknown, callback?: Callback): this;
-  }
-  export class Transform extends Duplex { constructor(options?: TransformOptions); }
-  export class PassThrough extends Transform {}
-  export function pipeline(...streams: Array<Stream | Callback>): Stream;
-  export function finished(stream: Stream, callback: Callback): () => void;
-  export function addAbortSignal<T extends Stream>(signal: AbortSignal, stream: T): T;
-  export function duplexPair(options?: TransformOptions): [Duplex, Duplex];
-  export function isStream(value: unknown): value is Stream;
-  export function isReadable(value: unknown): boolean;
-  export function isWritable(value: unknown): boolean;
-  export function isErrored(value: unknown): boolean;
-  export function isDisturbed(value: unknown): boolean;
-}
-
 declare module "string_decoder" {
   export class StringDecoder {
     readonly encoding: string;
@@ -130,7 +85,6 @@ declare module "util" {
 
 declare module "node:console" { export * from "console"; }
 declare module "node:path" { export * from "path"; }
-declare module "node:stream" { export * from "stream"; }
 declare module "node:string_decoder" { export * from "string_decoder"; }
 declare module "node:timers" { export * from "timers"; }
 declare module "node:timers/promises" { export * from "timers/promises"; }

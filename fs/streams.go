@@ -8,26 +8,48 @@ import (
 	"github.com/dop251/goja_nodejs/streams"
 )
 
+type fileStreamReadResult struct {
+	data []byte
+	done bool
+}
+
 func newFileReadableStream(instance *moduleInstance, handle *FileHandle) goja.Value {
 	rt := instance.rt
 	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
 		Pull: func(controller *goja.Object) goja.Value {
-			data := make([]byte, instance.core.ChunkSize())
-			n, readErr := handle.Read(data)
-			if readErr != nil && !errors.Is(readErr, io.EOF) {
-				callController(rt, controller, "error", jsError(rt, readErr))
+			return instance.promiseCall(func() (any, error) {
+				data := make([]byte, instance.core.ChunkSize())
+				n, readErr := handle.Read(data)
+				done := errors.Is(readErr, io.EOF)
+				if readErr != nil && !done {
+					_ = handle.closeAndWait()
+					return nil, readErr
+				}
+				if done {
+					if closeErr := handle.closeAndWait(); closeErr != nil {
+						return nil, closeErr
+					}
+				}
+				return fileStreamReadResult{
+					data: append([]byte(nil), data[:n]...),
+					done: done,
+				}, nil
+			}, func(rt *goja.Runtime, value any) goja.Value {
+				result := value.(fileStreamReadResult)
+				if len(result.data) > 0 {
+					callController(rt, controller, "enqueue", bytesValue(rt, result.data))
+				}
+				if result.done {
+					callController(rt, controller, "close")
+				}
 				return goja.Undefined()
-			}
-			if n == 0 && errors.Is(readErr, io.EOF) {
-				callController(rt, controller, "close")
-				return goja.Undefined()
-			}
-			callController(rt, controller, "enqueue", bytesValue(rt, data[:n]))
-			return goja.Undefined()
+			})
 		},
 		Cancel: func(reason goja.Value) goja.Value {
 			_ = reason
-			return goja.Undefined()
+			return instance.promiseCall(func() (any, error) {
+				return nil, handle.closeAndWait()
+			}, nil)
 		},
 	})
 	if err != nil {
@@ -42,22 +64,29 @@ func newFileWritableStream(instance *moduleInstance, handle *FileHandle) goja.Va
 		Write: func(chunk goja.Value, _ *goja.Object) goja.Value {
 			data, err := bytesFromValue(rt, chunk)
 			if err != nil {
-				panicJSError(rt, err)
+				return instance.promiseCall(func() (any, error) {
+					_ = handle.closeAndWait()
+					return nil, err
+				}, nil)
 			}
-			if err := handle.WriteAll(data); err != nil {
-				panicJSError(rt, err)
-			}
-			return goja.Undefined()
+			return instance.promiseCall(func() (any, error) {
+				writeErr := handle.WriteAll(data)
+				if writeErr != nil {
+					_ = handle.closeAndWait()
+				}
+				return nil, writeErr
+			}, nil)
 		},
 		Close: func() goja.Value {
-			if err := handle.Sync(); err != nil {
-				panicJSError(rt, err)
-			}
-			return goja.Undefined()
+			return instance.promiseCall(func() (any, error) {
+				return nil, handle.closeAndWait()
+			}, nil)
 		},
 		Abort: func(reason goja.Value) goja.Value {
 			_ = reason
-			return goja.Undefined()
+			return instance.promiseCall(func() (any, error) {
+				return nil, handle.closeAndWait()
+			}, nil)
 		},
 	})
 	if err != nil {
@@ -72,65 +101,117 @@ func (m *moduleInstance) writeReadableStream(
 	options writeFileOptions,
 	text bool,
 ) goja.Value {
-	handle, err := m.openWriteHandle(name, options)
-	if err != nil {
-		return rejectedPromise(m.rt, err)
+	rt := m.rt
+	result, resolve, reject := rt.NewPromise()
+	settled := false
+	var subscription *abortSubscription
+
+	settleAbort := func(reason goja.Value) {
+		if settled {
+			return
+		}
+		settled = true
+		subscription.cleanup(rt)
+		_ = reject(valueOrUndefined(reason))
+	}
+	var validationError goja.Value
+	subscription, validationError = subscribeAbortSignal(rt, options.signal, settleAbort)
+	if validationError != nil {
+		settled = true
+		_ = reject(validationError)
+		return rt.ToValue(result)
+	}
+	if settled {
+		return rt.ToValue(result)
 	}
 
-	streamValue := input
-	if text {
-		encoder, newErr := m.rt.New(streams.Exports(m.rt).Get("TextEncoderStream"))
-		if newErr != nil {
-			_ = handle.Close()
-			return rejectedPromise(m.rt, newErr)
-		}
-		piped, pipeErr := callObjectMethod(
-			input.ToObject(m.rt),
-			"pipeThrough",
-			encoder,
-		)
-		if pipeErr != nil {
-			_ = handle.Close()
-			return rejectedPromise(m.rt, pipeErr)
-		}
-		streamValue = piped
-	}
-
-	consumed, consumeErr := streams.ConsumeReadableStream(m.rt, streamValue, func(chunk goja.Value) goja.Value {
-		data, err := bytesFromValue(m.rt, chunk)
-		if err != nil {
-			panicJSError(m.rt, err)
-		}
-		if err := handle.WriteAll(data); err != nil {
-			panicJSError(m.rt, err)
-		}
-		return goja.Undefined()
-	})
-	if consumeErr != nil {
-		_ = handle.Close()
-		return rejectedPromise(m.rt, consumeErr)
-	}
-
-	result, resolve, reject := m.rt.NewPromise()
-	thenPromise(
-		m.rt,
-		m.rt.ToValue(consumed),
-		func(goja.FunctionCall) goja.Value {
-			closeErr := handle.Close()
-			if closeErr != nil {
-				_ = reject(jsError(m.rt, closeErr))
-			} else {
-				_ = resolve(goja.Undefined())
+	settleOpen := func(handle *FileHandle, openErr error) {
+		if openErr != nil {
+			if !settled {
+				settled = true
+				subscription.cleanup(rt)
+				_ = reject(jsErrorValue(rt, openErr))
 			}
-			return goja.Undefined()
-		},
-		func(call goja.FunctionCall) goja.Value {
+			return
+		}
+		if settled {
+			go func() { _ = handle.closeAndWait() }()
+			return
+		}
+
+		streamValue := input
+		if text {
+			encoder, err := rt.New(streams.Exports(rt).Get("TextEncoderStream"))
+			if err != nil {
+				settled = true
+				subscription.cleanup(rt)
+				_ = handle.Close()
+				_ = reject(jsErrorValue(rt, err))
+				return
+			}
+			streamValue, err = callObjectMethod(input.ToObject(rt), "pipeThrough", encoder)
+			if err != nil {
+				settled = true
+				subscription.cleanup(rt)
+				_ = handle.Close()
+				_ = reject(jsErrorValue(rt, err))
+				return
+			}
+		}
+
+		destination := newFileWritableStream(m, handle)
+		pipeArgs := []goja.Value{destination}
+		if options.signal != nil && !goja.IsUndefined(options.signal) && !goja.IsNull(options.signal) {
+			pipeOptions := rt.NewObject()
+			_ = pipeOptions.Set("signal", options.signal)
+			pipeArgs = append(pipeArgs, pipeOptions)
+		}
+		piped, err := callObjectMethod(streamValue.ToObject(rt), "pipeTo", pipeArgs...)
+		if err != nil {
+			settled = true
+			subscription.cleanup(rt)
 			_ = handle.Close()
-			_ = reject(call.Argument(0))
-			return goja.Undefined()
-		},
-	)
-	return m.rt.ToValue(result)
+			_ = reject(jsErrorValue(rt, err))
+			return
+		}
+		thenPromise(
+			rt,
+			piped,
+			func(goja.FunctionCall) goja.Value {
+				if !settled {
+					settled = true
+					subscription.cleanup(rt)
+					_ = resolve(goja.Undefined())
+				}
+				return goja.Undefined()
+			},
+			func(call goja.FunctionCall) goja.Value {
+				if !settled {
+					settled = true
+					subscription.cleanup(rt)
+					_ = reject(call.Argument(0))
+				}
+				return goja.Undefined()
+			},
+		)
+	}
+
+	open := func() {
+		handle, err := m.openWriteHandle(name, options)
+		if m.scheduler == nil {
+			settleOpen(handle, err)
+			return
+		}
+		if !m.scheduler.RunOnLoop(func(*goja.Runtime) { settleOpen(handle, err) }) && handle != nil {
+			_ = handle.closeAndWait()
+		}
+	}
+	if m.scheduler == nil {
+		open()
+	} else {
+		go open()
+	}
+	return rt.ToValue(result)
 }
 
 func (m *moduleInstance) openWriteHandle(name string, options writeFileOptions) (*FileHandle, error) {
@@ -189,6 +270,6 @@ func thenPromise(
 
 func rejectedPromise(rt *goja.Runtime, err error) goja.Value {
 	promise, _, reject := rt.NewPromise()
-	_ = reject(jsError(rt, err))
+	_ = reject(jsErrorValue(rt, err))
 	return rt.ToValue(promise)
 }

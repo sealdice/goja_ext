@@ -17,9 +17,8 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 - 只需要 URL、事件、Buffer、路径等同步能力：启用对应模块即可，不需要 event loop。
 - 需要 setTimeout、Promise timers、Fetch、SSE、FS 异步 API、WebSocket 或流式
   网络处理：使用 eventloop.NewEventLoop，并在 loop 所属 runtime 中安装模块。
-- 需要 Node classic stream 或 FS 的 createReadStream/createWriteStream：
-  显式导入 github.com/dop251/goja_nodejs/streams/node，并为 FS 设置
-  fs.WithStreams(true)。
+- 需要文件分块读写：为 FS 设置 `fs.WithStreams(true)`，使用
+  `FsFile.readable/writable` 或 `writeFile(ReadableStream)`。
 - 需要完整 Node 内置模块、npm 包、process.argv、child_process 等能力：本项目
   不是合适的替代品，应使用真正的 Node.js 运行时。
 
@@ -27,9 +26,9 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 
 ### 模块总览
 
-所有下表中的 core module 都支持 require("模块名")。由 require.RegisterCoreModule
-注册的模块同时支持 require("node:模块名")；同一个 runtime 内两种写法返回同一份
-导出对象。global 一栏表示调用 Go 的 Enable 后会额外安装的全局对象。
+所有下表中的模块都支持列出的 `require()` 入口。多数 Node 兼容模块还支持
+`node:` 别名；`fs` 明确只提供 Deno 风格入口。global 一栏表示调用 Go 的 Enable
+后会额外安装的全局对象。
 
 | 模块 | JavaScript 入口 | 提供的功能 | 与 Node.js 的主要区别 |
 | --- | --- | --- | --- |
@@ -39,12 +38,11 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 | console | require("console")；global: console | 常用输出、assert/dir、计数、计时、分组和 trace | 输出交给 Go 的 Printer；没有 Console 流构造器、table、profile 和浏览器可展开对象视图 |
 | abort | require("abort")；global: AbortController、AbortSignal | 取消控制、timeout、throwIfAborted | 面向 Fetch 等模块的轻量实现，不承诺浏览器/Node 完整 Abort API |
 | fetch | require("fetch")、require("@microsoft/fetch-event-source")；global: fetch、Headers、Request、Response、FormData | HTTP Fetch、请求/响应体 Web Stream、POST SSE、超时、代理、取消 | HTTP 使用 Resty 配置的 Go client；流式上传不可用于 307/308 重放，必须有 event loop |
-| fs | require("fs")、require("fs/promises")；global: fs | Afero-backed Deno 风格文件 API、Node callback/Promise wrapper、Stats、文件流 | 后端由宿主注入；symlink/hard link 等能力必须显式提供；watch、文件锁、terminal 不在当前子集；字节为 Uint8Array |
+| fs | require("fs")、require("fs/promises")；global: fs | Afero-backed Deno 风格文件 API、FsFile、WHATWG 文件流 | 不提供 node:fs、callback、Node flags/Stats；symlink/hard link 等能力必须显式提供；字节为 Uint8Array |
 | path | require("path")；另有 posix、win32 | 路径拼接、解析、规范化、相对路径、盘符和 UNC | resolve 读取 runtime-local cwd，不调用宿主进程 chdir；只实现列出的 path API |
 | process | require("process")；global: process | env 快照、cwd、runtime-local chdir | 当前不含 nextTick、argv、platform 等进程控制信息；不会修改宿主进程 cwd |
-| streams | require("streams")、require("stream/web")；global: Web Streams | WHATWG ReadableStream、WritableStream、TransformStream、BYOB、reader/writer、文本流 | 使用嵌入的 web-streams-polyfill；流块通常是原生 Uint8Array，不依赖 Buffer |
-| Node streams | require("stream") | Readable、Writable、Duplex、Transform、PassThrough、pipeline、Web adapter | 基于嵌入的 streamx，不是 Node 原生实现；字符串 chunk 转成 Uint8Array，read(0) 不支持，且需要显式注册 |
-| string_decoder | require("string_decoder") | 跨 chunk 的 utf8、utf16le/ucs2、base64、hex、latin1 解码 | 独立的 Go 实现；streamx 内部使用自己的 text-decoder，不自动接管经典流内部 |
+| streams | require("streams")、require("stream/web")、require("node:stream/web")；global: Web Streams | WHATWG ReadableStream、WritableStream、TransformStream、BYOB、reader/writer、文本流 | 使用嵌入的 web-streams-polyfill；不提供 Node classic stream；流块通常是原生 Uint8Array |
+| string_decoder | require("string_decoder") | 跨 chunk 的 utf8、utf16le/ucs2、base64、hex、latin1 解码 | 独立的 Go 实现，不接入 Web Streams 内部 |
 | timers | require("timers")、require("timers/promises") | timeout、interval、immediate、Promise timers、async iterator、scheduler.wait | 必须有 event loop；顶层脚本中解构 Promise timers 的 setTimeout 可能触发 Goja TDZ 冲突 |
 | url | require("url")；global: URL、URLSearchParams | URL 解析、查询参数、域名 ASCII/Unicode 转换 | Go 原生 Node 风格子集；默认端口会规范化，完整 WHATWG 边界行为不以 Node 版本兼容为承诺 |
 | util | require("util") | Node 常用 format 占位符、对象 inspect、内建类型、循环引用和深度控制 | 不支持颜色、自定义 inspect hook 等完整选项，复杂输出不保证逐字符一致 |
@@ -104,16 +102,6 @@ Fetch 的 Response.body 是 Web ReadableStream，读取时得到 Uint8Array：
 })();
 ~~~
 
-Node classic streams 是可选表面。宿主完成 streams/node 注册后，才可以使用：
-
-~~~javascript
-const { Readable } = require("stream");
-
-const source = Readable.from(["hello", " ", "streams"]);
-const web = Readable.toWeb(source);
-const reader = web.getReader();
-~~~
-
 ### 各模块的使用要点
 
 #### require 与原生模块
@@ -149,22 +137,18 @@ Uint8Array；它们不会因为 Buffer 模块已加载就自动转换。
 
 #### fs、path 与 process
 
-fs 有两种表面：
-
-- fs.Enable* 安装 Deno 风格的全局 fs，包括同步/异步文件操作、目录、临时文件、
-  FsFile 和 WHATWG 流。
-- require("fs") 和 require("fs/promises") 提供 Node 风格 wrapper。最后一个参数
-  是函数时使用 callback，否则返回 Promise。
+`fs.Enable*`、`require("fs")` 和 `require("fs/promises")` 使用同一份 Deno 风格
+文件系统状态，包括同步/异步文件操作、目录、临时文件、FsFile 和 WHATWG 流。
+异步调用只返回 Promise/AsyncIterable，不接受 Node callback。
 
 path.resolve()、fs.cwd() 和 process.cwd() 共享 runtime-local cwd。调用
 process.chdir() 或 fs.chdir() 不会改变 Go 进程的工作目录，也不会影响其他 runtime。
 
-#### Web Streams 与 Node streams
+#### Web Streams
 
-streams.Enable(rt) 安装 Web Streams 全局构造器；require("stream/web") 返回同一
-份 canonical 导出。Node classic streams 由 streams/node 包通过 blank import 注册，
-并且只在首次使用 Web adapter 时加载 Web Streams。两套流不能假定 chunk 类型与 Node
-完全相同：classic stream 的字符串 chunk 会转换为 Uint8Array。
+streams.Enable(rt) 安装 Web Streams 全局构造器；`require("streams")`、
+`require("stream/web")` 和 `require("node:stream/web")` 返回同一份 canonical 导出。
+`stream`、`node:stream` 和 `node:streams` 不受支持。
 
 #### timers
 
@@ -472,12 +456,9 @@ loop.Run(func(rt *goja.Runtime) {
 })
 ~~~
 
-需要 require("fs") 的 createReadStream/createWriteStream 或 FsFile 的
-readable/writable 时，同时：
+需要 `FsFile.readable/writable` 或 `writeFile(ReadableStream)` 时：
 
 ~~~go
-import _ "github.com/dop251/goja_nodejs/streams/node"
-
 options := []fs.Option{
     fs.WithFS(backend),
     fs.WithCwd("/workspace"),
@@ -556,8 +537,7 @@ runtime-bound event loop。不要把一个 loop 传给另一个 runtime。
 - process.env 是初始化时的环境变量快照；process.chdir 是 runtime-local 操作。
 - Fetch 的 body 只能按 Web API 语义消费一次；Response.body、FS 流和 Web Streams
   使用 Uint8Array，需要 Buffer 时必须显式转换。
-- Node classic streams 是 streamx facade，任何依赖 Node readable-stream 私有字段、
-  特定错误对象或精确 chunk 行为的第三方包都需要单独验证。
+- `stream`、`node:stream`、`node:fs` 和 `node:fs/promises` 不属于公开 API。
 - FS 的 symlink、hard link、lstat 等能力来自宿主 capability；不能假定任意 Afero
   backend 都具备这些操作。
 - WebSocket 默认验证 TLS；不要为了绕过证书问题在生产环境设置

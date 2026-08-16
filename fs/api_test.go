@@ -159,19 +159,21 @@ func TestRequireWithLoopRejectsForeignRuntime(t *testing.T) {
 }
 
 func runFSAPIScriptWithCwd(t *testing.T, cwd, script string) string {
+	return runFSAPIScriptWithBackend(t, afero.NewMemMapFs(), cwd, script)
+}
+
+func runFSAPIScriptWithBackend(t *testing.T, backend afero.Fs, cwd, script string, extra ...fs.Option) string {
 	t.Helper()
 
 	registry := require.NewRegistry()
-	backend := afero.NewMemMapFs()
-	loader := fs.RequireWithOptions(
+	options := []fs.Option{
 		fs.WithFS(backend),
 		fs.WithCwd(cwd),
 		fs.WithStreams(true),
-	)
-	promiseLoader := fs.RequirePromisesWithOptions(
-		fs.WithFS(backend),
-		fs.WithCwd(cwd),
-	)
+	}
+	options = append(options, extra...)
+	loader := fs.RequireWithOptions(options...)
+	promiseLoader := fs.RequirePromisesWithOptions(options...)
 	registry.RegisterNativeModule("fs", loader)
 	registry.RegisterNativeModule("fs/promises", promiseLoader)
 
@@ -229,9 +231,8 @@ func TestDenoPathAPISyncAndPromises(t *testing.T) {
 			fs.cwd(),
 			Array.prototype.slice.call(bytes).join(","),
 			fs.readTextFileSync("docs/readme.txt"),
-			stat.name,
 			stat.size,
-			stat.isFile(),
+			stat.isFile,
 			fs.readDirSync("docs")[0].name,
 		].join("|");
 
@@ -242,7 +243,7 @@ func TestDenoPathAPISyncAndPromises(t *testing.T) {
 			globalThis.__result = sync + "|" + items[1];
 		});
 	`)
-	if result != "/workspace|104,101,108,108,111|hello|readme.txt|5|true|readme.txt|hello" {
+	if result != "/workspace|104,101,108,108,111|hello|5|true|readme.txt|hello" {
 		t.Fatalf("unexpected Deno path API result: %s", result)
 	}
 }
@@ -257,7 +258,7 @@ func TestDenoFsAndPromisesShareCwd(t *testing.T) {
 			globalThis.__result = [
 				fs.cwd(),
 				fs.readTextFileSync("inside.txt"),
-				fs.statSync("../shared/inside.txt").isFile(),
+				fs.statSync("../shared/inside.txt").isFile,
 			].join("|");
 		});
 	`)
@@ -397,7 +398,7 @@ func TestDenoLoaderDoesNotShareCwdAcrossRuntimes(t *testing.T) {
 	}
 }
 
-func TestDenoRegisterWithOptionsInstallsNodeAliases(t *testing.T) {
+func TestRegisterWithOptionsDoesNotInstallNodeAliases(t *testing.T) {
 	registry := require.NewRegistry()
 	fs.RegisterWithOptions(
 		registry,
@@ -414,14 +415,19 @@ func TestDenoRegisterWithOptionsInstallsNodeAliases(t *testing.T) {
 	done := make(chan string, 1)
 	loop.RunOnLoop(func(vm *goja.Runtime) {
 		value, err := vm.RunString(`
-			const fs = require("fs");
-			const nodeFs = require("node:fs");
-			const promises = require("fs/promises");
-			const nodePromises = require("node:fs/promises");
+			const unavailable = [];
+			for (const name of ["node:fs", "node:fs/promises"]) {
+				try {
+					require(name);
+					unavailable.push(false);
+				} catch {
+					unavailable.push(true);
+				}
+			}
 			String(
-				fs.cwd() === nodeFs.cwd() &&
-				typeof promises.readFile === "function" &&
-				promises.readFile === nodePromises.readFile
+				typeof require("fs").readFile === "function" &&
+				typeof require("fs/promises").readFile === "function" &&
+				unavailable.every(Boolean)
 			);
 		`)
 		if err != nil {
@@ -432,14 +438,14 @@ func TestDenoRegisterWithOptionsInstallsNodeAliases(t *testing.T) {
 	select {
 	case result := <-done:
 		if result != "true" {
-			t.Fatalf("node aliases were not installed: %s", result)
+			t.Fatalf("module surface was not Deno-only: %s", result)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout waiting for node alias test")
+		t.Fatal("timeout waiting for module surface test")
 	}
 }
 
-func TestDenoRegisterWithLoopInstallsAsyncNodeAliases(t *testing.T) {
+func TestDenoRegisterWithLoopInstallsAsyncModules(t *testing.T) {
 	registry := require.NewRegistry()
 	loop := eventloop.NewEventLoop(
 		eventloop.EnableConsole(false),
@@ -457,8 +463,8 @@ func TestDenoRegisterWithLoopInstallsAsyncNodeAliases(t *testing.T) {
 	done := make(chan string, 1)
 	loop.RunOnLoop(func(vm *goja.Runtime) {
 		value, err := vm.RunString(`
-			const fs = require("node:fs");
-			const promises = require("node:fs/promises");
+			const fs = require("fs");
+			const promises = require("fs/promises");
 			fs.mkdirSync("alias", { recursive: true });
 			promises.writeTextFile("alias/file.txt", "x").then(function () {
 				globalThis.__result = fs.readTextFileSync("alias/file.txt");
@@ -478,10 +484,156 @@ func TestDenoRegisterWithLoopInstallsAsyncNodeAliases(t *testing.T) {
 	select {
 	case result := <-done:
 		if result != "x" {
-			t.Fatalf("async node alias did not complete: %s", result)
+			t.Fatalf("async Deno module did not complete: %s", result)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout waiting for async node alias test")
+	}
+}
+
+func TestDenoOpenDefaultsToReadOnly(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeTextFileSync("default-open.txt", "ok");
+		const file = fs.openSync("default-open.txt");
+		const data = new Uint8Array(2);
+		const count = file.readSync(data);
+		file.close();
+		globalThis.__result = count + "|" + Array.prototype.join.call(data, ",");
+	`)
+	if result != "2|111,107" {
+		t.Fatalf("default open result = %q", result)
+	}
+}
+
+func TestDenoFileInfoAndDirEntryUseBooleanProperties(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.mkdirSync("entries", { recursive: true });
+		fs.writeTextFileSync("entries/value.txt", "x");
+		const info = fs.statSync("entries/value.txt");
+		const entry = fs.readDirSync("entries")[0];
+		globalThis.__result = [
+			typeof info.isFile,
+			info.isFile,
+			typeof info.isDirectory,
+			info.isDirectory,
+			typeof entry.isFile,
+			entry.isFile,
+			typeof entry.isSymlink,
+			entry.isSymlink,
+		].join("|");
+	`)
+	if result != "boolean|true|boolean|false|boolean|true|boolean|false" {
+		t.Fatalf("Deno metadata shape = %q", result)
+	}
+}
+
+func TestDenoReadFileDoesNotAcceptNodeEncodingOptions(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeTextFileSync("bytes.txt", "hello");
+		fs.readFile("bytes.txt", { encoding: "utf8" }).then(
+			(value) => {
+				globalThis.__result = value instanceof Uint8Array
+					? "bytes"
+					: typeof value;
+			},
+			(error) => { globalThis.__result = "error:" + error; },
+		);
+	`)
+	if result != "bytes" {
+		t.Fatalf("readFile result = %q", result)
+	}
+}
+
+func TestDenoByteWriteAPIsRejectStrings(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		const results = [];
+		try {
+			fs.writeFileSync("sync.txt", "text");
+			results.push("sync:accepted");
+		} catch (error) {
+			results.push("sync:" + (error instanceof TypeError));
+		}
+		const file = fs.createSync("handle.txt");
+		try {
+			file.writeSync("text");
+			results.push("handle:accepted");
+		} catch (error) {
+			results.push("handle:" + (error instanceof TypeError));
+		} finally {
+			file.close();
+		}
+		fs.writeFile("async.txt", "text").then(
+			() => results.push("async:accepted"),
+			(error) => results.push("async:" + (error instanceof TypeError)),
+		).then(() => { globalThis.__result = results.join("|"); });
+	`)
+	if result != "sync:true|handle:true|async:true" {
+		t.Fatalf("byte write string handling = %q", result)
+	}
+}
+
+func TestDenoFileAPIsRejectPreAbortedSignalReason(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeTextFileSync("source.txt", "hello");
+		const reason = { marker: "stop" };
+		const signal = {
+			aborted: true,
+			reason,
+			addEventListener() {},
+			removeEventListener() {},
+		};
+		const checks = [
+			fs.readFile("source.txt", { signal }),
+			fs.readTextFile("source.txt", { signal }),
+			fs.writeFile("binary.txt", new Uint8Array([1]), { signal }),
+			fs.writeTextFile("text.txt", "x", { signal }),
+		].map((promise) => promise.then(
+			() => false,
+			(error) => error === reason,
+		));
+		Promise.all(checks).then((values) => {
+			globalThis.__result = values.join("|");
+		});
+	`)
+	if result != "true|true|true|true" {
+		t.Fatalf("pre-aborted file operations = %q", result)
+	}
+}
+
+func TestDenoWriteFileIgnoresUnknownTruncateOption(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		fs.writeTextFileSync("value.txt", "abcdef");
+		fs.writeTextFileSync("value.txt", "x", { truncate: false });
+		globalThis.__result = fs.readTextFileSync("value.txt");
+	`)
+	if result != "x" {
+		t.Fatalf("write with unknown truncate option = %q", result)
+	}
+}
+
+func TestDenoTextWriteAPIsRejectNonStrings(t *testing.T) {
+	result := runFSAPIScript(t, `
+		const fs = require("fs");
+		const results = [];
+		try {
+			fs.writeTextFileSync("sync.txt", 1);
+			results.push("sync:accepted");
+		} catch (error) {
+			results.push("sync:" + (error instanceof TypeError));
+		}
+		fs.writeTextFile("async.txt", 1).then(
+			() => results.push("async:accepted"),
+			(error) => results.push("async:" + (error instanceof TypeError)),
+		).then(() => { globalThis.__result = results.join("|"); });
+	`)
+	if result != "sync:true|async:true" {
+		t.Fatalf("text write value handling = %q", result)
 	}
 }
 
@@ -551,7 +703,7 @@ func TestDenoPathMutationTempAndReadDirAPIs(t *testing.T) {
 		fs.chownSync("ops/moved.txt", 1, 2);
 
 		const created = fs.createSync("ops/created.txt");
-		created.writeSync("x");
+		created.writeSync(new Uint8Array([120]));
 		created.close();
 
 		const tempFile = fs.makeTempFileSync({
@@ -589,7 +741,7 @@ func TestDenoPathMutationTempAndReadDirAPIs(t *testing.T) {
 						fs.readTextFileSync("ops/moved.txt"),
 						String(tempFile.startsWith("/workspace/ops/p-") && tempFile.endsWith(".tmp")),
 						String(tempDir.startsWith("/workspace/ops/d-") && tempDir.endsWith(".dir")),
-						String(fs.statSync(tempDir).isDirectory()),
+						String(fs.statSync(tempDir).isDirectory),
 						fs.readTextFileSync("ops/async-moved.txt"),
 						String(asyncTemp.endsWith(".dat")),
 						String(names.indexOf("source.txt") === -1),
@@ -632,7 +784,7 @@ func TestErrorCodes_ENOENTOpenAndRead(t *testing.T) {
 		const fs = require("fs");
 		const codes = [];
 		let o = null;
-		try { fs.openSync("/missing", "r"); } catch (err) { o = err; }
+		try { fs.openSync("/missing", { read: true }); } catch (err) { o = err; }
 		codes.push(o ? o.code + ":" + o.syscall + ":" + o.path : "no-err");
 		let r = null;
 		try { fs.readFileSync("/missing"); } catch (err) { r = err; }
@@ -654,19 +806,5 @@ func TestErrorCodes_EEXIST(t *testing.T) {
 	`)
 	if result != "EEXIST|mkdir|/d" {
 		t.Fatalf("unexpected EEXIST result: %s", result)
-	}
-}
-
-func TestReadFileSyncEncodings(t *testing.T) {
-	result := runFSAPIScriptWithCwd(t, "/workspace", `
-		const fs = require("fs");
-		fs.writeFileSync("enc.bin", new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]));
-		globalThis.__result = [
-			fs.readFileSync("enc.bin", "base64"),
-			fs.readFileSync("enc.bin", "hex"),
-		].join("|");
-	`)
-	if result != "aGVsbG8=|68656c6c6f" {
-		t.Fatalf("unexpected encoding result: %s", result)
 	}
 }

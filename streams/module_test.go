@@ -99,6 +99,20 @@ func TestModuleAliasesShareConstructors(t *testing.T) {
 	}
 }
 
+func TestNodeStreamsPluralAliasIsNotRegistered(t *testing.T) {
+	result := runStreamsScript(t, `
+		try {
+			require("node:streams");
+			globalThis.__result = "loaded";
+		} catch {
+			globalThis.__result = "missing";
+		}
+	`)
+	if result != "missing" {
+		t.Fatalf("unexpected node:streams module result: %s", result)
+	}
+}
+
 func TestReadableStreamDefaultReaderReadsQueuedChunks(t *testing.T) {
 	result := runStreamsScript(t, `
 		const stream = new ReadableStream({

@@ -13,4 +13,4 @@ Goja 兼容的 Node `string_decoder` 模块。
 - 默认 `utf8`，跨 chunk 保留不完整多字节序列；`end()`/`fillLast()` 时以单个 U+FFFD 替换尾部不完整序列。
 - `base64` 跨 chunk 保留不足 3 字节的尾部；`ucs2`/`utf16le` 保留奇数字节和末尾高代理项。
 - 其他编码：`ascii`、`latin1`/`binary`、`hex`。
-- 注意：streamx 栈使用 `text-decoder`，本模块仅供用户代码，不接入经典流内部。
+- 本模块供用户代码显式使用，不接入 Web Streams 内部。

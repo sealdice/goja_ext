@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -20,6 +21,7 @@ type writeFileOptions struct {
 	createNew  bool
 	truncate   bool
 	mode       os.FileMode
+	signal     goja.Value
 }
 
 type tempPathOptions struct {
@@ -229,28 +231,19 @@ func (m *moduleInstance) truncate(call goja.FunctionCall) goja.Value {
 
 func (m *moduleInstance) readFileSync(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
-	enc := encodingFromOptions(m.rt, call.Argument(1))
 	data, err := m.readFileBytes(name)
 	if err != nil {
 		panicJSError(m.rt, err)
-	}
-	if enc != "" && enc != "buffer" {
-		return buffer.EncodeBytes(m.rt, data, m.rt.ToValue(enc))
 	}
 	return bytesValue(m.rt, data)
 }
 
 func (m *moduleInstance) readFile(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
-	enc := encodingFromOptions(m.rt, call.Argument(1))
-	return m.nodeCall(call, func() (any, error) {
+	return m.promiseCallWithSignal(signalFromOptions(m.rt, call.Argument(1)), func() (any, error) {
 		return m.readFileBytes(name)
 	}, func(rt *goja.Runtime, value any) goja.Value {
-		data := value.([]byte)
-		if enc != "" && enc != "buffer" {
-			return buffer.EncodeBytes(rt, data, rt.ToValue(enc))
-		}
-		return bytesValue(rt, data)
+		return bytesValue(rt, value.([]byte))
 	})
 }
 
@@ -265,7 +258,7 @@ func (m *moduleInstance) readTextFileSync(call goja.FunctionCall) goja.Value {
 
 func (m *moduleInstance) readTextFile(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
-	return m.promiseCall(func() (any, error) {
+	return m.promiseCallWithSignal(signalFromOptions(m.rt, call.Argument(1)), func() (any, error) {
 		data, err := m.readFileBytes(name)
 		return string(data), err
 	}, func(rt *goja.Runtime, value any) goja.Value {
@@ -301,9 +294,9 @@ func (m *moduleInstance) writeFile(call goja.FunctionCall) goja.Value {
 	}
 	data, err := bytesFromValue(m.rt, dataValue)
 	if err != nil {
-		panicJSError(m.rt, err)
+		return rejectedPromise(m.rt, err)
 	}
-	return m.promiseCall(func() (any, error) {
+	return m.promiseCallWithSignal(options.signal, func() (any, error) {
 		return nil, m.writeFileBytes(name, data, options)
 	}, nil)
 }
@@ -313,8 +306,12 @@ func (m *moduleInstance) writeTextFileSync(call goja.FunctionCall) goja.Value {
 	if streams.IsReadableStream(m.rt, call.Argument(1)) {
 		panicJSError(m.rt, errors.New("stream input is not supported by writeTextFileSync"))
 	}
+	text, err := textFromValue(m.rt, call.Argument(1))
+	if err != nil {
+		panicJSError(m.rt, err)
+	}
 	options := writeFileOptionsFromObject(objectOrEmpty(m.rt, call.Argument(2)))
-	if err := m.writeFileBytes(name, []byte(call.Argument(1).String()), options); err != nil {
+	if err := m.writeFileBytes(name, []byte(text), options); err != nil {
 		panicJSError(m.rt, err)
 	}
 	return goja.Undefined()
@@ -330,8 +327,12 @@ func (m *moduleInstance) writeTextFile(call goja.FunctionCall) goja.Value {
 		}
 		return m.writeReadableStream(name, dataValue, options, true)
 	}
-	data := []byte(dataValue.String())
-	return m.promiseCall(func() (any, error) {
+	text, err := textFromValue(m.rt, dataValue)
+	if err != nil {
+		return rejectedPromise(m.rt, err)
+	}
+	data := []byte(text)
+	return m.promiseCallWithSignal(options.signal, func() (any, error) {
 		return nil, m.writeFileBytes(name, data, options)
 	}, nil)
 }
@@ -340,11 +341,6 @@ func (m *moduleInstance) openSync(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
 	flags := parseOpenFlags(m.rt, call.Argument(1))
 	mode := openMode(m.rt, call.Argument(1))
-	if goja.IsString(call.Argument(1)) {
-		if arg := call.Argument(2); arg != nil && !goja.IsUndefined(arg) {
-			mode = os.FileMode(arg.ToInteger())
-		}
-	}
 	handle, err := m.core.OpenFile(name, flags, mode)
 	if err != nil {
 		panicJSError(m.rt, err)
@@ -356,12 +352,7 @@ func (m *moduleInstance) open(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
 	flags := parseOpenFlags(m.rt, call.Argument(1))
 	mode := openMode(m.rt, call.Argument(1))
-	if goja.IsString(call.Argument(1)) {
-		if arg := call.Argument(2); arg != nil && !goja.IsUndefined(arg) {
-			mode = os.FileMode(arg.ToInteger())
-		}
-	}
-	return m.nodeCall(call, func() (any, error) {
+	return m.promiseCall(func() (any, error) {
 		return m.core.OpenFile(name, flags, mode)
 	}, func(rt *goja.Runtime, value any) goja.Value {
 		return bindFsFile(m.withRuntime(rt), value.(*FileHandle))
@@ -445,11 +436,7 @@ func (m *moduleInstance) readDirSync(call goja.FunctionCall) goja.Value {
 
 func (m *moduleInstance) readDir(call goja.FunctionCall) goja.Value {
 	name := requiredPath(m.rt, call.Argument(0), "path")
-	entries, err := m.readDirEntries(name)
-	if err != nil {
-		panicJSError(m.rt, err)
-	}
-	return asyncDirIterator(m.rt, entries)
+	return asyncDirIterator(m, name)
 }
 
 func (m *moduleInstance) readFileBytes(name string) ([]byte, error) {
@@ -497,9 +484,17 @@ func writeFileOptionsFromObject(options *goja.Object) writeFileOptions {
 		appendMode: appendMode,
 		create:     propertyBool(options, "create", true),
 		createNew:  propertyBool(options, "createNew", false),
-		truncate:   propertyBoolDefault(options, "truncate", !appendMode),
+		truncate:   !appendMode,
 		mode:       propertyMode(options, "mode", 0o666),
+		signal:     options.Get("signal"),
 	}
+}
+
+func signalFromOptions(rt *goja.Runtime, value goja.Value) goja.Value {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return goja.Undefined()
+	}
+	return value.ToObject(rt).Get("signal")
 }
 
 func (m *moduleInstance) tempPathOptionsFromObject(options *goja.Object) tempPathOptions {
@@ -515,7 +510,7 @@ func (m *moduleInstance) makeTempFileHandle(options tempPathOptions) (*FileHandl
 	if err != nil {
 		return nil, wrapPathError("makeTempFile", m.core.ResolvePath(options.dir), "", err)
 	}
-	return &FileHandle{core: m.core, file: file}, nil
+	return newFileHandle(m.core, file), nil
 }
 
 func (m *moduleInstance) makeTempDirName(options tempPathOptions) (string, error) {
@@ -575,7 +570,7 @@ func (m *moduleInstance) promiseCall(
 		value, err := op()
 		settle := func(rt *goja.Runtime) {
 			if err != nil {
-				_ = reject(jsError(rt, err))
+				_ = reject(jsErrorValue(rt, err))
 				return
 			}
 			if convert == nil {
@@ -710,10 +705,6 @@ func propertyBool(object *goja.Object, name string, defaultValue bool) bool {
 	return value.ToBoolean()
 }
 
-func propertyBoolDefault(object *goja.Object, name string, defaultValue bool) bool {
-	return propertyBool(object, name, defaultValue)
-}
-
 func propertyString(object *goja.Object, name, defaultValue string) string {
 	value := object.Get(name)
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
@@ -732,7 +723,10 @@ func propertyMode(object *goja.Object, name string, defaultValue os.FileMode) os
 
 func bytesFromValue(rt *goja.Runtime, value goja.Value) ([]byte, error) {
 	if goja.IsString(value) {
-		return []byte(value.String()), nil
+		exception := rt.Try(func() {
+			panic(rt.NewTypeError("binary file APIs require an ArrayBuffer or ArrayBufferView"))
+		})
+		return nil, exception
 	}
 	var data []byte
 	var panicValue *goja.Exception
@@ -747,6 +741,16 @@ func bytesFromValue(rt *goja.Runtime, value goja.Value) ([]byte, error) {
 	return append([]byte(nil), data...), nil
 }
 
+func textFromValue(rt *goja.Runtime, value goja.Value) (string, error) {
+	if goja.IsString(value) {
+		return value.String(), nil
+	}
+	exception := rt.Try(func() {
+		panic(rt.NewTypeError("text file APIs require a string or ReadableStream"))
+	})
+	return "", exception
+}
+
 func bytesValue(rt *goja.Runtime, data []byte) goja.Value {
 	arrayBuffer := rt.NewArrayBuffer(append([]byte(nil), data...))
 	typed, err := rt.New(rt.Get("Uint8Array"), rt.ToValue(arrayBuffer))
@@ -754,10 +758,6 @@ func bytesValue(rt *goja.Runtime, data []byte) goja.Value {
 		panic(err)
 	}
 	return typed
-}
-
-func fileInfoValue(rt *goja.Runtime, info os.FileInfo) *goja.Object {
-	return nodeStatsValue(rt, info)
 }
 
 func dateValue(rt *goja.Runtime, value time.Time) goja.Value {
@@ -771,28 +771,54 @@ func dateValue(rt *goja.Runtime, value time.Time) goja.Value {
 func dirEntryValue(rt *goja.Runtime, info os.FileInfo) *goja.Object {
 	object := rt.NewObject()
 	_ = object.Set("name", info.Name())
-	_ = object.Set("isFile", func(goja.FunctionCall) goja.Value { return rt.ToValue(info.Mode().IsRegular()) })
-	_ = object.Set("isDirectory", func(goja.FunctionCall) goja.Value { return rt.ToValue(info.IsDir()) })
-	_ = object.Set("isSymlink", func(goja.FunctionCall) goja.Value { return rt.ToValue(info.Mode()&os.ModeSymlink != 0) })
+	_ = object.Set("isFile", info.Mode().IsRegular())
+	_ = object.Set("isDirectory", info.IsDir())
+	_ = object.Set("isSymlink", info.Mode()&os.ModeSymlink != 0)
 	return object
 }
 
-func asyncDirIterator(rt *goja.Runtime, entries []os.FileInfo) *goja.Object {
+type asyncDirResult struct {
+	info os.FileInfo
+	done bool
+}
+
+func asyncDirIterator(instance *moduleInstance, name string) *goja.Object {
+	rt := instance.rt
+	var mu sync.Mutex
+	var entries []os.FileInfo
+	loaded := false
 	index := 0
 	iterator := rt.NewObject()
 	_ = iterator.Set("next", func(goja.FunctionCall) goja.Value {
-		promise, resolve, _ := rt.NewPromise()
-		result := rt.NewObject()
-		if index >= len(entries) {
-			_ = result.Set("value", goja.Undefined())
-			_ = result.Set("done", true)
-		} else {
-			_ = result.Set("value", dirEntryValue(rt, entries[index]))
-			_ = result.Set("done", false)
+		return instance.promiseCall(func() (any, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !loaded {
+				var err error
+				entries, err = instance.readDirEntries(name)
+				if err != nil {
+					return nil, err
+				}
+				loaded = true
+			}
+			if index >= len(entries) {
+				return asyncDirResult{done: true}, nil
+			}
+			result := asyncDirResult{info: entries[index]}
 			index++
-		}
-		_ = resolve(result)
-		return rt.ToValue(promise)
+			return result, nil
+		}, func(rt *goja.Runtime, value any) goja.Value {
+			entry := value.(asyncDirResult)
+			result := rt.NewObject()
+			if entry.done {
+				_ = result.Set("value", goja.Undefined())
+				_ = result.Set("done", true)
+			} else {
+				_ = result.Set("value", dirEntryValue(rt, entry.info))
+				_ = result.Set("done", false)
+			}
+			return result
+		})
 	})
 	if symbol, ok := rt.Get("Symbol").ToObject(rt).Get("asyncIterator").(*goja.Symbol); ok {
 		_ = iterator.SetSymbol(symbol, func(goja.FunctionCall) goja.Value {
@@ -803,8 +829,11 @@ func asyncDirIterator(rt *goja.Runtime, entries []os.FileInfo) *goja.Object {
 }
 
 func parseOpenFlags(rt *goja.Runtime, value goja.Value) int {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return openRead
+	}
 	if goja.IsString(value) {
-		return parseNodeFlags(rt, value.String())
+		panic(rt.NewTypeError(`"options" must be an object`))
 	}
 	options := objectOrEmpty(rt, value)
 	read := propertyBool(options, "read", false)
@@ -845,5 +874,8 @@ func parseOpenFlags(rt *goja.Runtime, value goja.Value) int {
 }
 
 func openMode(rt *goja.Runtime, value goja.Value) os.FileMode {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return 0o666
+	}
 	return propertyMode(objectOrEmpty(rt, value), "mode", 0o666)
 }

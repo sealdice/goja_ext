@@ -90,9 +90,7 @@ func registerLoaders(
 		panic("fs: registry is required")
 	}
 	registry.RegisterNativeModule(ModuleName, full)
-	registry.RegisterNativeModule(require.NodePrefix+ModuleName, full)
 	registry.RegisterNativeModule(PromisesModuleName, promises)
-	registry.RegisterNativeModule(require.NodePrefix+PromisesModuleName, promises)
 }
 
 func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option) require.ModuleLoader {
@@ -124,7 +122,6 @@ func requireWithOptions(loop *eventloop.EventLoop, promises bool, opts ...Option
 		exports := module.Get("exports").ToObject(rt)
 		if promises {
 			bindPromiseExports(instance, exports)
-			bindNodePromiseExports(instance, exports)
 		} else {
 			bindFullExports(instance, exports)
 		}
@@ -292,13 +289,12 @@ func RequirePromises(rt *goja.Runtime, module *goja.Object) {
 }
 
 func init() { //nolint:gochecknoinits // auto-register core module via blank import
-	require.RegisterCoreModule(ModuleName, Require)
-	require.RegisterCoreModule(PromisesModuleName, RequirePromises)
+	require.RegisterNativeModule(ModuleName, Require)
+	require.RegisterNativeModule(PromisesModuleName, RequirePromises)
 }
 
 func bindFullExports(instance *moduleInstance, exports *goja.Object) {
 	bindDenoExports(instance, exports)
-	bindNodeExports(instance, exports)
 }
 
 func bindDenoExports(instance *moduleInstance, exports *goja.Object) {

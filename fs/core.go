@@ -467,10 +467,21 @@ func (c *Core) Chtimes(name string, atime, mtime time.Time) error {
 }
 
 type FileHandle struct {
-	core   *Core
-	file   afero.File
-	mu     sync.Mutex
-	closed bool
+	core *Core
+	file afero.File
+
+	opMu sync.Mutex
+
+	stateMu        sync.Mutex
+	active         bool
+	closeRequested bool
+	closeStarted   bool
+	closeErr       error
+	closeDone      chan struct{}
+}
+
+func newFileHandle(core *Core, file afero.File) *FileHandle {
+	return &FileHandle{core: core, file: file, closeDone: make(chan struct{})}
 }
 
 func (c *Core) OpenFile(name string, flags int, perm os.FileMode) (*FileHandle, error) {
@@ -498,72 +509,131 @@ func (c *Core) OpenFile(name string, flags int, perm os.FileMode) (*FileHandle, 
 	if err != nil {
 		return nil, wrapPathError("open", resolved, "", err)
 	}
-	return &FileHandle{core: c, file: file}, nil
+	return newFileHandle(c, file), nil
 }
 
-func (f *FileHandle) withOpen(fn func(afero.File) error) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
+func (f *FileHandle) beginOperation() error {
+	f.opMu.Lock()
+	f.stateMu.Lock()
+	if f.closeRequested {
+		f.stateMu.Unlock()
+		f.opMu.Unlock()
 		return ErrClosedHandle
 	}
-	return fn(f.file)
-}
-
-func (f *FileHandle) Close() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return nil
-	}
-	f.closed = true
-	return f.file.Close()
-}
-
-func (f *FileHandle) Read(p []byte) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return 0, ErrClosedHandle
-	}
-	return f.file.Read(p)
-}
-
-func (f *FileHandle) Write(p []byte) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return 0, ErrClosedHandle
-	}
-	return f.file.Write(p)
-}
-
-func (f *FileHandle) WriteAll(p []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return ErrClosedHandle
-	}
-	for len(p) > 0 {
-		n, err := f.file.Write(p)
-		if err != nil {
-			return err
-		}
-		if n <= 0 {
-			return io.ErrShortWrite
-		}
-		p = p[n:]
-	}
+	f.active = true
+	f.stateMu.Unlock()
 	return nil
 }
 
-func (f *FileHandle) Seek(offset int64, whence int) (int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return 0, ErrClosedHandle
+func (f *FileHandle) finishOperation() bool {
+	f.stateMu.Lock()
+	f.active = false
+	closedDuringOperation := f.closeRequested
+	shouldClose := f.closeRequested && !f.closeStarted
+	if shouldClose {
+		f.closeStarted = true
 	}
-	return f.file.Seek(offset, whence)
+	f.stateMu.Unlock()
+
+	if shouldClose {
+		f.completeClose(f.file.Close())
+	}
+	f.opMu.Unlock()
+	return closedDuringOperation
+}
+
+func (f *FileHandle) completeClose(err error) {
+	f.stateMu.Lock()
+	f.closeErr = err
+	close(f.closeDone)
+	f.stateMu.Unlock()
+}
+
+func (f *FileHandle) withOpen(fn func(afero.File) error) error {
+	if err := f.beginOperation(); err != nil {
+		return err
+	}
+	err := fn(f.file)
+	if f.finishOperation() {
+		return ErrClosedHandle
+	}
+	return err
+}
+
+func (f *FileHandle) Close() error {
+	f.stateMu.Lock()
+	if f.closeRequested {
+		err := f.closeErr
+		f.stateMu.Unlock()
+		return err
+	}
+	f.closeRequested = true
+	if f.active {
+		f.stateMu.Unlock()
+		return nil
+	}
+	f.closeStarted = true
+	f.stateMu.Unlock()
+
+	err := f.file.Close()
+	f.completeClose(err)
+	return err
+}
+
+func (f *FileHandle) closeAndWait() error {
+	if err := f.Close(); err != nil {
+		return err
+	}
+	<-f.closeDone
+	f.stateMu.Lock()
+	defer f.stateMu.Unlock()
+	return f.closeErr
+}
+
+func (f *FileHandle) Read(p []byte) (int, error) {
+	var n int
+	err := f.withOpen(func(file afero.File) error {
+		var err error
+		n, err = file.Read(p)
+		return err
+	})
+	return n, err
+}
+
+func (f *FileHandle) Write(p []byte) (int, error) {
+	var n int
+	err := f.withOpen(func(file afero.File) error {
+		var err error
+		n, err = file.Write(p)
+		return err
+	})
+	return n, err
+}
+
+func (f *FileHandle) WriteAll(p []byte) error {
+	return f.withOpen(func(file afero.File) error {
+		for len(p) > 0 {
+			n, err := file.Write(p)
+			if err != nil {
+				return err
+			}
+			if n <= 0 {
+				return io.ErrShortWrite
+			}
+			p = p[n:]
+		}
+		return nil
+	})
+}
+
+func (f *FileHandle) Seek(offset int64, whence int) (int64, error) {
+	var position int64
+	err := f.withOpen(func(file afero.File) error {
+		var err error
+		position, err = file.Seek(offset, whence)
+		return err
+	})
+	return position, err
 }
 
 func (f *FileHandle) Truncate(size int64) error {
@@ -589,14 +659,9 @@ func (f *FileHandle) Sync() error {
 }
 
 func (f *FileHandle) Chtimes(atime, mtime time.Time) error {
-	var name string
-	if err := f.withOpen(func(file afero.File) error {
-		name = file.Name()
-		return nil
-	}); err != nil {
-		return err
-	}
-	return f.core.Chtimes(name, atime, mtime)
+	return f.withOpen(func(file afero.File) error {
+		return f.core.Chtimes(file.Name(), atime, mtime)
+	})
 }
 
 func (f *FileHandle) Readdir() ([]os.FileInfo, error) {

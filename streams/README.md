@@ -1,45 +1,25 @@
 # streams 模块
 
-WHATWG Streams 与 Node classic streams 的 Goja 实现。
+项目统一使用 WHATWG Streams，不提供 Node classic `stream`/`node:stream`。
 
 ## 模块名
 
-- `require("streams")` / `require("stream/web")` / `require("node:stream/web")` —— WHATWG Web Streams（`web-streams-polyfill@4.3.0`）
-- `require("stream")` / `require("node:stream")` —— Node classic streams（**streamx** 引擎，见 `streams/node`）
+- `require("streams")`
+- `require("stream/web")`
+- `require("node:stream/web")`
 - `streams.Enable(rt)` 安装全局 Web Streams 构造器。
 
-## WHATWG 能力
+三个模块入口在同一 runtime 中共享 canonical 构造器。非标准的
+`require("node:streams")` 不受支持。
 
-- `ReadableStream`（含 byte stream/BYOB、`from`、`values`、async iterator）、`WritableStream`、`TransformStream`、reader/writer/controller、`tee`/`pipeTo`/`pipeThrough`、两种 QueuingStrategy。
-- `TextEncoder` / `TextDecoder` 与 `TextEncoderStream` / `TextDecoderStream`
-  （UTF-8）；支持增量解码、BOM、fatal、ignoreBOM 和 encodeInto，编码器输出
-  原生 `Uint8Array`，Web Streams 层不依赖 Node `Buffer`。
-- Go 侧集成：`streams.NewReadableStream` / `NewWritableStream` / `IsReadableStream` / `ConsumeReadableStream`（`streams/integration.go`），供 fs、fetch 等复用 canonical 流。
+## 能力
 
-## Node classic（streamx 引擎）
+- `ReadableStream`（含 byte stream/BYOB、async iterator）、`WritableStream`、
+  `TransformStream`、reader/writer/controller、`tee`、`pipeTo`、`pipeThrough`
+  和两种 QueuingStrategy。
+- `TextEncoder`、`TextDecoder`、`TextEncoderStream`、`TextDecoderStream`。
+- Go 集成：`NewReadableStream`、`NewWritableStream`、`IsReadableStream`、
+  `ConsumeReadableStream`，供 fs、fetch、Cloudflare KV 等模块复用。
 
-- 构造器：`Readable` / `Writable` / `Duplex` / `Transform` / `PassThrough`。
-- 辅助：`pipeline`、`finished`、`addAbortSignal`、`Readable.from`、谓词、`duplexPair`。
-- Web ↔ classic 适配：`Readable.toWeb/fromWeb`、`Writable.toWeb/fromWeb`、`Duplex.toWeb/fromWeb`。
-- 仅加载 Node classic streams 不初始化 Web Streams；上述适配器首次调用时
-  才解析 canonical `stream/web`。
-- 事件基座复用 canonical `events` 模块（`require("events").EventEmitter` 与 stream 对象构造器身份一致）。
-- bundle 来源：`streams/internal/streamx`（streamx@2.28.0，esbuild，SHA-256 见其 README）；构建脚本 `scripts/build-node-streams.mjs`。
-
-## 已知差异（vs Node classic）
-
-- 字符串 chunk 在写/推时被转换为 `Uint8Array`（需 `Buffer.from(chunk).toString(encoding)` 解码）。
-- `read(0)` 不支持；默认 destroy 错误为 `STREAM_DESTROYED`；状态存于 `_duplexState` 位掩码。
-
-## Go API
-
-```go
-// 读取 canonical ReadableStream
-consumed, err := streams.ConsumeReadableStream(rt, stream, func(chunk goja.Value) goja.Value {
-    return goja.Undefined() // 返回 Promise 可施加背压
-})
-```
-
-## 说明
-
-- goja 未定义 `Symbol.asyncIterator`；`streams`/`events` 装配时将其设为 `Symbol.for("Symbol.asyncIterator")`，保证 polyfill 的 `ReadableStream.from` 与 streamx async iterator 一致。
+实现基于嵌入的 `web-streams-polyfill@4.3.0`，字节块使用原生 `Uint8Array`，
+不依赖 Node `Buffer`。

@@ -18,4 +18,4 @@ Goja 兼容的 Node `process` 模块（当前为最小实现）。
 ## 说明
 
 当前 portable subset 不含 `process.nextTick`、`argv`、`platform` 等进程
-控制信息。streamx 使用私有注入的 microtask 函数，不依赖 process。
+控制信息。异步模块通过 runtime scheduler 调度，不依赖 process。

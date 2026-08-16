@@ -7,7 +7,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/streams"
-	_ "github.com/dop251/goja_nodejs/streams/node"
 )
 
 func main() {
@@ -24,19 +23,17 @@ func main() {
 			return
 		}
 		_, err := rt.RunString(`
-			const { Readable } = require("stream");
-			let emitted = false;
-			const classic = new Readable({
-				read() {
-					if (emitted) return;
-					emitted = true;
-					this.push("hello");
-					this.push(" ");
-					this.push("streams");
-					this.push(null);
+			const { ReadableStream, TextEncoder, TextDecoderStream } = require("streams");
+			const encoder = new TextEncoder();
+			const source = new ReadableStream({
+				start(controller) {
+					controller.enqueue(encoder.encode("hello"));
+					controller.enqueue(encoder.encode(" "));
+					controller.enqueue(encoder.encode("streams"));
+					controller.close();
 				}
 			});
-			const decoded = Readable.toWeb(classic).pipeThrough(new TextDecoderStream());
+			const decoded = source.pipeThrough(new TextDecoderStream());
 			const reader = decoded.getReader();
 			let text = "";
 			function pump(result) {
