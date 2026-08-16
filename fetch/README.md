@@ -61,8 +61,8 @@ import (
     "time"
 
     "github.com/dop251/goja"
-    "github.com/sealdice/goja_ext/eventloop"
-    "github.com/sealdice/goja_ext/fetch"
+    "github.com/dop251/goja_nodejs/eventloop"
+    "github.com/dop251/goja_nodejs/fetch"
 )
 
 rt := goja.New()

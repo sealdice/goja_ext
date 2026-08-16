@@ -122,6 +122,59 @@ func TestBindNamespaceSupportsJSONListAndMetadata(t *testing.T) {
 	}
 }
 
+func TestBindNamespaceObjectsSupportNestedAsyncAndSyncAccessWithoutGlobals(t *testing.T) {
+	loop := eventloop.NewEventLoop()
+	loop.Start()
+	defer loop.Stop()
+
+	mem := newMemStore()
+	result := runScript(t, loop, func(vm *goja.Runtime) error {
+		storage := vm.NewObject()
+		kv := vm.NewObject()
+		if err := cloudflarekv.BindNamespaceObject(vm, loop, kv, mem); err != nil {
+			return err
+		}
+		syncKV := vm.NewObject()
+		if err := cloudflarekv.BindSyncNamespaceObject(vm, syncKV, mem); err != nil {
+			return err
+		}
+		if err := storage.Set("kv", kv); err != nil {
+			return err
+		}
+		if err := storage.Set("synckv", syncKV); err != nil {
+			return err
+		}
+		if err := vm.Set("storage", storage); err != nil {
+			return err
+		}
+
+		_, err := vm.RunString(`
+			if (typeof KV !== "undefined" || typeof SyncKV !== "undefined") {
+				throw new Error("namespace object binding leaked a global");
+			}
+			storage.synckv.put("sync", "sync-value");
+			storage.kv.put("async", "async-value")
+				.then(function () {
+					return storage.kv.get("async");
+				})
+				.then(function (asyncValue) {
+					done(JSON.stringify({
+						asyncValue: asyncValue,
+						syncValue: storage.synckv.get("sync")
+					}));
+				})
+				.catch(function (err) {
+					fail(String(err));
+				});
+		`)
+		return err
+	})
+
+	if result != `{"asyncValue":"async-value","syncValue":"sync-value"}` {
+		t.Fatalf("unexpected nested storage result: %s", result)
+	}
+}
+
 func TestBindNamespaceSupportsTypedArrays(t *testing.T) {
 	loop := eventloop.NewEventLoop()
 	loop.Start()

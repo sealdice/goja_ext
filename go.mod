@@ -1,11 +1,10 @@
-module github.com/sealdice/goja_ext
+module github.com/dop251/goja_nodejs
 
 go 1.25
 
 require (
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217
 	github.com/dop251/goja v0.0.0-20260806115107-493f22071ef6
-	github.com/dop251/goja_nodejs v0.0.0-20211022123610-8dd9abb0616d
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/ncruces/go-sqlite3 v0.32.0
@@ -24,5 +23,3 @@ require (
 	github.com/tetratelabs/wazero v1.11.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )
-
-replace github.com/dop251/goja_nodejs => .

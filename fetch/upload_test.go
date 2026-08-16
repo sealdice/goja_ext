@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/abort"
-	"github.com/sealdice/goja_ext/require"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/abort"
+	"github.com/dop251/goja_nodejs/require"
+	"github.com/dop251/goja_nodejs/streams"
 	"go.uber.org/goleak"
 )
 

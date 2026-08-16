@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/sealdice/goja_ext/streams/node"
+	_ "github.com/dop251/goja_nodejs/streams/node"
 )
 
 func TestNodeCallbackAPI(t *testing.T) {

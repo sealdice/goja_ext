@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/streams/internal/streamx"
+	"github.com/dop251/goja_nodejs/streams/internal/streamx"
 )
 
 var polyfillProgram = mustCompilePolyfill()

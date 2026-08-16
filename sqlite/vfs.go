@@ -6,10 +6,10 @@ import (
 	"os"
 	"sync"
 
+	hostfs "github.com/dop251/goja_nodejs/fs"
 	"github.com/ncruces/go-sqlite3"
 	"github.com/ncruces/go-sqlite3/util/vfsutil"
 	"github.com/ncruces/go-sqlite3/vfs"
-	hostfs "github.com/sealdice/goja_ext/fs"
 	"github.com/spf13/afero"
 )
 

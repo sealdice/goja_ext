@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/dop251/goja_nodejs/fs"
 	"github.com/ncruces/go-sqlite3"
 	"github.com/ncruces/go-sqlite3/vfs"
-	"github.com/sealdice/goja_ext/fs"
 	"github.com/spf13/afero"
 )
 

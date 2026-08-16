@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/errors"
+	"github.com/dop251/goja_nodejs/errors"
 )
 
 func RequiredIntegerArgument(r *goja.Runtime, call goja.FunctionCall, name string, argIndex int) int64 {

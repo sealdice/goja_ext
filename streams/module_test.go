@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/streams"
 )
 
 func runStreamsScript(t *testing.T, script string) string {

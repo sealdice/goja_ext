@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/buffer"
+	hostfs "github.com/dop251/goja_nodejs/fs"
 	"github.com/ncruces/go-sqlite3"
 	"github.com/ncruces/go-sqlite3/vfs"
-	"github.com/sealdice/goja_ext/buffer"
-	hostfs "github.com/sealdice/goja_ext/fs"
 )
 
 var bindingVFSID atomic.Uint64

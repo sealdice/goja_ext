@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/require"
-	utilpkg "github.com/sealdice/goja_ext/util"
+	"github.com/dop251/goja_nodejs/require"
+	utilpkg "github.com/dop251/goja_nodejs/util"
 )
 
 func TestUtil_Format(t *testing.T) {

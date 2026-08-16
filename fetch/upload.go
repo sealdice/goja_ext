@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/runtimehost"
-	"github.com/sealdice/goja_ext/streams"
+	"github.com/dop251/goja_nodejs/runtimehost"
+	"github.com/dop251/goja_nodejs/streams"
 )
 
 type uploadItem struct {

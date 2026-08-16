@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/buffer"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/buffer"
+	"github.com/dop251/goja_nodejs/require"
 )
 
 func TestBufferFrom(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/require"
 )
 
 func TestFetchEventSourceModuleExportsWithoutBrowserGlobals(t *testing.T) {

@@ -18,7 +18,7 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 - 需要 setTimeout、Promise timers、Fetch、SSE、FS 异步 API、WebSocket 或流式
   网络处理：使用 eventloop.NewEventLoop，并在 loop 所属 runtime 中安装模块。
 - 需要 Node classic stream 或 FS 的 createReadStream/createWriteStream：
-  显式导入 github.com/sealdice/goja_ext/streams/node，并为 FS 设置
+  显式导入 github.com/dop251/goja_nodejs/streams/node，并为 FS 设置
   fs.WithStreams(true)。
 - 需要完整 Node 内置模块、npm 包、process.argv、child_process 等能力：本项目
   不是合适的替代品，应使用真正的 Node.js 运行时。
@@ -186,12 +186,22 @@ new WebSocket(url) 创建客户端连接，事件通过 open、message、close�
 
 ### 安装与版本
 
-~~~bash
-go get github.com/sealdice/goja_ext/eventloop
+本仓库保持 `github.com/dop251/goja_nodejs` 模块身份，以便调用方将直接依赖和
+第三方库的间接依赖统一替换到 goja_ext。请在调用方的 `go.mod` 中配置：
+
+~~~go
+require github.com/dop251/goja_nodejs <upstream-version>
+
+replace github.com/dop251/goja_nodejs => github.com/sealdice/goja_ext <goja-ext-version>
 ~~~
 
-项目 go.mod 声明 Go 1.23，并指定 toolchain go1.24.5；开发和部署建议使用
-Go 1.24.5 或更新版本。
+然后仍使用原模块路径安装和导入：
+
+~~~bash
+go get github.com/dop251/goja_nodejs/eventloop
+~~~
+
+项目 go.mod 声明 Go 1.25；开发和部署需要使用 Go 1.25 或更新版本。
 
 ### 创建一个组合 runtime
 
@@ -203,12 +213,12 @@ package main
 
 import (
     "github.com/dop251/goja"
-    "github.com/sealdice/goja_ext/abort"
-    "github.com/sealdice/goja_ext/eventloop"
-    "github.com/sealdice/goja_ext/fetch"
-    "github.com/sealdice/goja_ext/process"
-    "github.com/sealdice/goja_ext/require"
-    "github.com/sealdice/goja_ext/streams"
+    "github.com/dop251/goja_nodejs/abort"
+    "github.com/dop251/goja_nodejs/eventloop"
+    "github.com/dop251/goja_nodejs/fetch"
+    "github.com/dop251/goja_nodejs/process"
+    "github.com/dop251/goja_nodejs/require"
+    "github.com/dop251/goja_nodejs/streams"
 )
 
 func main() {
@@ -323,11 +333,13 @@ type BulkGetter interface {
 超限或读取错误不能留下半个值。未实现可选接口时 bridge 会回退到基础接口，因此 JS API
 仍可用，但 stream 回退路径会在内存中完整缓冲。
 
-绑定方式有三种：
+绑定方式有五种：
 
 - `BindNamespace`：将指定的 store 以 Promise API 绑定为全局对象（如 KV）；
 - `BindSyncNamespace`：将指定的 store 以同步 API 绑定为全局对象（如 SyncKV），
   便于测试或脚本场景；
+- `BindNamespaceObject`：将 Promise API 安装到已有 JS 对象，不创建全局变量；
+- `BindSyncNamespaceObject`：将同步 API 安装到已有 JS 对象，不创建全局变量；
 - `InstallConstructor`：安装 `KVNamespace` 构造器，由 resolver 按 namespace
   名称解析对应的 store，模拟 Workers 的多命名空间绑定。
 
@@ -341,6 +353,23 @@ if err := cloudflarekv.BindNamespace(rt, loop, "KV", kv); err != nil {
 
 // 同步 API（无 Promise，不需要 event loop）：
 if err := cloudflarekv.BindSyncNamespace(rt, "SyncKV", kv); err != nil {
+    return err
+}
+
+// 安装到已有对象，适用于 storage.kv / storage.synckv 等嵌套绑定：
+storage := rt.NewObject()
+asyncObject := rt.NewObject()
+if err := cloudflarekv.BindNamespaceObject(rt, loop, asyncObject, kv); err != nil {
+    return err
+}
+syncObject := rt.NewObject()
+if err := cloudflarekv.BindSyncNamespaceObject(rt, syncObject, kv); err != nil {
+    return err
+}
+if err := storage.Set("kv", asyncObject); err != nil {
+    return err
+}
+if err := storage.Set("synckv", syncObject); err != nil {
     return err
 }
 
@@ -445,7 +474,7 @@ loop.Run(func(rt *goja.Runtime) {
 readable/writable 时，同时：
 
 ~~~go
-import _ "github.com/sealdice/goja_ext/streams/node"
+import _ "github.com/dop251/goja_nodejs/streams/node"
 
 options := []fs.Option{
     fs.WithFS(backend),

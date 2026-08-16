@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
-	_ "github.com/sealdice/goja_ext/abort"
-	_ "github.com/sealdice/goja_ext/buffer"
-	"github.com/sealdice/goja_ext/eventloop"
-	webstreams "github.com/sealdice/goja_ext/streams"
+	_ "github.com/dop251/goja_nodejs/abort"
+	_ "github.com/dop251/goja_nodejs/buffer"
+	"github.com/dop251/goja_nodejs/eventloop"
+	webstreams "github.com/dop251/goja_nodejs/streams"
 )
 
 func TestNodeStreamInitializationIsPrivateAndWebStreamsAreLazy(t *testing.T) {

@@ -4,11 +4,11 @@ import (
 	"fmt"
 
 	"github.com/dop251/goja"
-	"github.com/sealdice/goja_ext/eventloop"
-	"github.com/sealdice/goja_ext/fs"
-	_ "github.com/sealdice/goja_ext/path"
-	"github.com/sealdice/goja_ext/process"
-	"github.com/sealdice/goja_ext/require"
+	"github.com/dop251/goja_nodejs/eventloop"
+	"github.com/dop251/goja_nodejs/fs"
+	_ "github.com/dop251/goja_nodejs/path"
+	"github.com/dop251/goja_nodejs/process"
+	"github.com/dop251/goja_nodejs/require"
 	"github.com/spf13/afero"
 )
 

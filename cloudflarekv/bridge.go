@@ -78,7 +78,7 @@ func BindNamespaceObject(vm *goja.Runtime, loop *eventloop.EventLoop, target *go
 		return errors.New("event loop is required")
 	}
 	if target == nil {
-		return errors.New("target object is required")
+		return errors.New("target is required")
 	}
 	if ns == nil {
 		return errors.New("store is required")
@@ -112,7 +112,7 @@ func BindSyncNamespaceObject(vm *goja.Runtime, target *goja.Object, ns store.Nam
 		return errors.New("runtime is required")
 	}
 	if target == nil {
-		return errors.New("target object is required")
+		return errors.New("target is required")
 	}
 	if ns == nil {
 		return errors.New("store is required")

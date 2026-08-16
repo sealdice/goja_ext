@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"testing"
 
-	rootfs "github.com/sealdice/goja_ext/fs"
-	"github.com/sealdice/goja_ext/fs/extra"
+	rootfs "github.com/dop251/goja_nodejs/fs"
+	"github.com/dop251/goja_nodejs/fs/extra"
 	"github.com/spf13/afero"
 )
 
