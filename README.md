@@ -36,7 +36,7 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 | require | require("./x")、require("pkg") | CommonJS、.js/.json、node_modules、Go 原生模块 | 只有宿主提供的 source loader 和文件内容可被加载；不自动执行 npm 安装，也没有 Node 的全部内置模块 |
 | events | require("events") | EventEmitter、once、on、监听器管理、Abort signal 集成 | 基于 bare-events 改编；行为以项目实现为准，带 signal 的部分 API 需要 abort |
 | buffer | require("buffer")；global: Buffer | Buffer 构造、from、alloc、concat、数字读写和编码转换 | 只承诺当前 codec 表；Web Streams 和 FS 字节结果仍是 Uint8Array，不会自动变成 Buffer |
-| console | require("console")；global: console | log、info、warn、error、debug、trace | 输出交给 Go 的 Printer；格式化是轻量 util.format，不是 Node 完整 console |
+| console | require("console")；global: console | 常用输出、assert/dir、计数、计时、分组和 trace | 输出交给 Go 的 Printer；没有 Console 流构造器、table、profile 和浏览器可展开对象视图 |
 | abort | require("abort")；global: AbortController、AbortSignal | 取消控制、timeout、throwIfAborted | 面向 Fetch 等模块的轻量实现，不承诺浏览器/Node 完整 Abort API |
 | fetch | require("fetch")、require("@microsoft/fetch-event-source")；global: fetch、Headers、Request、Response、FormData | HTTP Fetch、请求/响应体 Web Stream、POST SSE、超时、代理、取消 | HTTP 使用 Resty 配置的 Go client；流式上传不可用于 307/308 重放，必须有 event loop |
 | fs | require("fs")、require("fs/promises")；global: fs | Afero-backed Deno 风格文件 API、Node callback/Promise wrapper、Stats、文件流 | 后端由宿主注入；symlink/hard link 等能力必须显式提供；watch、文件锁、terminal 不在当前子集；字节为 Uint8Array |
@@ -47,7 +47,7 @@ goja_ext 是一组可按需组合的 Go 模块，为 Goja 提供 Node.js 风格�
 | string_decoder | require("string_decoder") | 跨 chunk 的 utf8、utf16le/ucs2、base64、hex、latin1 解码 | 独立的 Go 实现；streamx 内部使用自己的 text-decoder，不自动接管经典流内部 |
 | timers | require("timers")、require("timers/promises") | timeout、interval、immediate、Promise timers、async iterator、scheduler.wait | 必须有 event loop；顶层脚本中解构 Promise timers 的 setTimeout 可能触发 Goja TDZ 冲突 |
 | url | require("url")；global: URL、URLSearchParams | URL 解析、查询参数、域名 ASCII/Unicode 转换 | Go 原生 Node 风格子集；默认端口会规范化，完整 WHATWG 边界行为不以 Node 版本兼容为承诺 |
-| util | require("util") | format、inspect、循环引用检测和深度控制 | 只覆盖项目需要的占位符和 inspect 选项，不保证与 Node 输出逐字符一致 |
+| util | require("util") | Node 常用 format 占位符、对象 inspect、内建类型、循环引用和深度控制 | 不支持颜色、自定义 inspect hook 等完整选项，复杂输出不保证逐字符一致 |
 | structuredclone | require("structuredclone")；global: structuredClone | 复制数组、对象、Map、Set、Date、RegExp、ArrayBuffer、TypedArray 和循环引用 | 不支持函数、Symbol、WeakMap、WeakSet、Promise 及未知宿主对象，会抛 DataCloneError |
 | websocket | global: WebSocket | WebSocket 客户端、事件监听、文本消息、协议、关闭和连接管理 | 不是 require core module；底层是 Gorilla WebSocket，主要覆盖客户端基础生命周期，必须有 event loop |
 | cloudflarekv | global: KVNamespace、KV、SyncKV | Cloudflare Workers KV 兼容的 get/put/delete/list、metadata、过期时间、Web Stream | 不是 require core module；存储后端由 Go 宿主实现 store.NamespaceStore 注入；同步绑定（SyncKV）不支持 ReadableStream |
@@ -137,7 +137,9 @@ streams facade 使用同一个构造器，因此可以安全地混用事件和�
 events.once/events.on 需要先安装 abort。
 
 console 的输出通过 Go Printer 接口接收；eventloop.NewEventLoop() 默认安装
-console，也可以用 eventloop.EnableConsole(false) 关闭 runtime 内的全局对象。
+console，也可以用 eventloop.EnableConsole(false) 关闭 runtime 内的全局对象。对象参数
+会自动使用 util.inspect 格式化，因此直接输出 KV 返回值时能看到嵌套字段；文本后端不具备
+浏览器开发者工具的交互式展开能力。
 
 #### buffer 与字节边界
 
