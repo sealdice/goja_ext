@@ -535,11 +535,6 @@ func rejectedPromise(vm *goja.Runtime, err error) goja.Value {
 	return vm.ToValue(promise)
 }
 
-func parseGetType(vm *goja.Runtime, argument goja.Value) (string, error) {
-	options, err := parseGetOptions(vm, argument)
-	return options.valueType, err
-}
-
 type getOptions struct {
 	valueType        string
 	cacheTTL         time.Duration
