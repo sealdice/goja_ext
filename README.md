@@ -291,7 +291,7 @@ cloudflarekv 提供一个 Cloudflare Workers KV 风格的 JS 接口，存储后�
 宿主实现 `store.NamespaceStore` 注入，桥接层负责 JS 值与存储记录之间的转换
 （字符串/JSON/ArrayBuffer/ReadableStream、metadata、过期时间、list 分页）。
 
-`NamespaceStore` 是存储适配器需要实现的唯一接口：
+`NamespaceStore` 是存储适配器必须实现的基础接口：
 
 ~~~go
 type NamespaceStore interface {
@@ -301,6 +301,27 @@ type NamespaceStore interface {
     List(ctx context.Context, options store.ListOptions) (store.ListResult, error)
 }
 ~~~
+
+基础接口保持向后兼容，但其中的 `Get` / `Put` 必然完整物化 `[]byte`。需要真正的
+分块流读写或高效批量读取时，后端可以额外实现以下窄接口：
+
+~~~go
+type StreamGetter interface {
+    GetStream(ctx context.Context, key string) (store.StreamRecord, bool, error)
+}
+
+type StreamPutter interface {
+    PutStream(ctx context.Context, key string, body io.Reader, options store.PutOptions) error
+}
+
+type BulkGetter interface {
+    GetMany(ctx context.Context, keys []string) (map[string]store.Record, error)
+}
+~~~
+
+`StreamPutter` 必须保证原子可见性：只有完整读到 EOF 且返回 nil 后才能提交值；取消、
+超限或读取错误不能留下半个值。未实现可选接口时 bridge 会回退到基础接口，因此 JS API
+仍可用，但 stream 回退路径会在内存中完整缓冲。
 
 绑定方式有三种：
 
@@ -353,12 +374,32 @@ const value = await KV.get("user:1", "json");        // { name: "Ada" }
 const binary = await KV.get("logo.png", "arrayBuffer");
 const stream = await KV.get("logs.txt", "stream");   // ReadableStream
 
+const values = await KV.get(["user:1", "user:2"], "json");
+console.log(values.get("user:1"));                    // object or null
+
 const page = await KV.list({ prefix: "user:", limit: 100 });
 for (const key of page.keys) {
   console.log(key.name, key.metadata, key.expiration);
 }
 
 await KV.delete("user:1");
+~~~
+
+JS bridge 默认执行 Cloudflare KV 的形状限制（512-byte key、25 MiB value、
+1024-byte metadata、最多 100 个 bulk key、list limit 1000、过期时间至少 60 秒），
+并对同一个 key 的连续 put 应用 1 秒间隔。它还带有每个 binding 独立的 64 MiB LRU
+正/负缓存，默认 TTL 为 60 秒；JS 的 `cacheTtl` 可覆盖 TTL，但不得低于 30 秒。
+这些都是 bridge 策略，Go 代码直接调用 `NamespaceStore` 不受影响。宿主可以按需调整或关闭：
+
+~~~go
+limits := cloudflarekv.CloudflareLimits()
+limits.MaxValueBytes = 8 * 1024 * 1024
+
+err := cloudflarekv.BindNamespace(rt, loop, "KV", kv,
+    cloudflarekv.WithLimits(limits),
+    cloudflarekv.WithCacheCapacity(0),
+    cloudflarekv.WithWriteRateLimit(0),
+)
 ~~~
 
 `SyncKV` 提供相同的同步方法（get/getWithMetadata/put/delete/list），但
