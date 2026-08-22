@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/console"
 	"github.com/dop251/goja_nodejs/runtimehost"
 
 	"go.uber.org/goleak"
@@ -332,6 +333,45 @@ func TestRunNoConsole(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Call to console.log did not generate an error", err)
+	}
+}
+
+type captureConsole struct {
+	lines []string
+}
+
+func (c *captureConsole) Log(s string)   { c.lines = append(c.lines, s) }
+func (c *captureConsole) Warn(s string)  { c.lines = append(c.lines, s) }
+func (c *captureConsole) Error(s string) { c.lines = append(c.lines, s) }
+
+func TestWithConsoleConfigTagsAndFiltersOutput(t *testing.T) {
+	captured := &captureConsole{}
+	loop := NewEventLoop(WithConsoleConfig(console.Config{
+		Printer: console.StdPrinter{
+			StdoutPrint: func(s string) { captured.Log(s) },
+			StderrPrint: func(s string) { captured.Warn(s) },
+		},
+		Tag:    console.ModuleTag,
+		Filter: func(e console.Entry) bool { return e.Method != "log" },
+	}))
+
+	prg, err := goja.Compile("plugin.js", `
+		console.log("dropped");
+		console.warn("kept");
+	`, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loop.Run(func(vm *goja.Runtime) {
+		_, err = vm.RunProgram(prg)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"[plugin.js] kept"}
+	if len(captured.lines) != len(want) || captured.lines[0] != want[0] {
+		t.Fatalf("console lines = %#v, want %#v", captured.lines, want)
 	}
 }
 

@@ -1,6 +1,8 @@
 package console_test
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -56,6 +58,16 @@ func newConsoleRuntime(t *testing.T, printer console.Printer) *goja.Runtime {
 	registry := new(require.Registry)
 	registry.Enable(vm)
 	registry.RegisterNativeModule(console.ModuleName, console.RequireWithPrinter(printer))
+	console.Enable(vm)
+	return vm
+}
+
+func newConsoleRuntimeWithConfig(t *testing.T, cfg console.Config) *goja.Runtime {
+	t.Helper()
+	vm := goja.New()
+	registry := new(require.Registry)
+	registry.Enable(vm)
+	registry.RegisterNativeModule(console.ModuleName, console.RequireWithConfig(cfg))
 	console.Enable(vm)
 	return vm
 }
@@ -223,5 +235,81 @@ func TestConsoleTraceIncludesFormattedMessageAndStack(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "at caller (trace_test.js:") {
 		t.Fatalf("caller stack frame missing from %q", stderr)
+	}
+}
+
+func TestConsoleTagPrefixesOutput(t *testing.T) {
+	printer := new(capturedPrinter)
+	vm := newConsoleRuntimeWithConfig(t, console.Config{Printer: printer, Tag: console.ModuleTag})
+
+	_, err := vm.RunScript("plugin.js", `
+		function helper(msg) { console.log(msg); }
+		helper("hello");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"[plugin.js] hello"}; !equalStrings(printer.stdout, want) {
+		t.Fatalf("stdout = %#v, want %#v", printer.stdout, want)
+	}
+}
+
+func TestConsoleWithoutTagStaysUnprefixed(t *testing.T) {
+	printer := new(capturedPrinter)
+	vm := newConsoleRuntimeWithConfig(t, console.Config{Printer: printer})
+
+	_, err := vm.RunScript("plugin.js", `
+		console.log("hello");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"hello"}; !equalStrings(printer.stdout, want) {
+		t.Fatalf("stdout = %#v, want %#v", printer.stdout, want)
+	}
+}
+
+func TestConsoleFilterDropsByMethod(t *testing.T) {
+	printer := new(capturedPrinter)
+	vm := newConsoleRuntimeWithConfig(t, console.Config{
+		Printer: printer,
+		Tag:     console.ModuleTag,
+		Filter:  func(e console.Entry) bool { return e.Method != "log" },
+	})
+
+	_, err := vm.RunScript("plugin.js", `
+		console.log("dropped");
+		console.warn("kept");
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(printer.stdout) != 0 {
+		t.Fatalf("log lines should be dropped, stdout = %#v", printer.stdout)
+	}
+	if want := []string{"[plugin.js] kept"}; !equalStrings(printer.stderr, want) {
+		t.Fatalf("stderr = %#v, want %#v", printer.stderr, want)
+	}
+}
+
+func TestConsoleTagAttributesInnermostModule(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib.js")
+	main := filepath.Join(dir, "main.js")
+	if err := os.WriteFile(lib, []byte(`module.exports = function(){ console.log("from lib"); }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte(`require("./lib")()`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	printer := new(capturedPrinter)
+	vm := newConsoleRuntimeWithConfig(t, console.Config{Printer: printer, Tag: console.ModuleTag})
+
+	if _, err := vm.RunString("require('" + main + "')"); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"[lib.js] from lib"}; !equalStrings(printer.stdout, want) {
+		t.Fatalf("stdout = %#v, want %#v", printer.stdout, want)
 	}
 }
