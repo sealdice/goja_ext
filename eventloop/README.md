@@ -22,6 +22,17 @@ loop.RunOnLoop(func(vm *goja.Runtime) {
 })
 ```
 
+`NewEventLoop()` 默认安装 console；用 `WithConsoleConfig` 可为其开启按来源
+打标与过滤（详见 `console` 模块）：
+
+```go
+loop := eventloop.NewEventLoop(eventloop.WithConsoleConfig(console.Config{
+    Printer: printer,
+    Tag:     console.ModuleTag,
+    Filter:  func(e console.Entry) bool { return e.Method != "log" },
+}))
+```
+
 ## 说明
 
 - goja 非 goroutine-safe：所有引擎调用必须发生在循环线程。

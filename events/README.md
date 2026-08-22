@@ -18,8 +18,8 @@ sha256sum events.js
 
 ## 实现说明
 
-- canonical 实例按 runtime 缓存（global symbol），`events.Exports(rt)` 供 streamx facade 复用，保证构造器身份一致。
-- EventEmitter 为函数构造器：可 `new`、可 `class extends`、可 `EE.call(this)` + `Object.setPrototypeOf` 组合使用（与 readable-stream/streamx 的原型链操纵兼容）。
+- canonical 实例按 runtime 缓存（global symbol），`events.Exports(rt)` 可供其他宿主模块复用，保证构造器身份一致。
+- EventEmitter 为函数构造器：可 `new`、可 `class extends`、可 `EE.call(this)` + `Object.setPrototypeOf` 组合使用。
 - 与 bare-events 的行为差异：
   - `listeners()`/`rawListeners()` 返回纯函数数组（Node 语义）。
   - `error` 事件无监听者时在 `emit` 内同步抛出（Node 语义）。

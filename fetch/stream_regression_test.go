@@ -3,10 +3,8 @@ package fetch //nolint:testpackage
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +14,6 @@ import (
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/abort"
 	"github.com/dop251/goja_nodejs/streams"
-	"go.uber.org/goleak"
 )
 
 var errControlledBodyClosed = errors.New("controlled body closed")
@@ -78,74 +75,6 @@ func (b *contextReadCloser) Close() error {
 
 type immediateScheduler struct {
 	rt *goja.Runtime
-}
-
-func TestStreamingBodySchedulerRejectionStopsPump(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-
-	rt := goja.New()
-	body := newControlledReadCloser(1)
-	body.reads <- controlledRead{data: []byte("chunk")}
-	var loopCleanups atomic.Int32
-	var offLoopCleanups atomic.Int32
-	streamBody := newStreamingBody(
-		rejectingScheduler{rt: rt},
-		body,
-		func() { loopCleanups.Add(1) },
-		func() { offLoopCleanups.Add(1) },
-	)
-	_ = streamBody.pull(rt, rt.NewObject())
-	exited := make(chan struct{})
-	go func() {
-		streamBody.pump()
-		close(exited)
-	}()
-
-	select {
-	case <-body.closed:
-	case <-time.After(100 * time.Millisecond):
-		streamBody.close()
-		awaitSignal(t, exited, "pump exit after test cleanup")
-		t.Fatal("response body remained open after scheduler rejected waiter wake")
-	}
-	awaitSignal(t, exited, "pump exit after scheduler rejection")
-	if got := loopCleanups.Load(); got != 0 {
-		t.Fatalf("loop cleanup called %d times off-loop", got)
-	}
-	if got := offLoopCleanups.Load(); got != 1 {
-		t.Fatalf("off-loop cleanup called %d times", got)
-	}
-}
-
-func TestStreamingBodyTerminalSchedulerRejectionRunsOffLoopCleanup(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-
-	rt := goja.New()
-	body := newControlledReadCloser(1)
-	body.reads <- controlledRead{err: io.EOF}
-	var loopCleanups atomic.Int32
-	var offLoopCleanups atomic.Int32
-	streamBody := newStreamingBody(
-		rejectingScheduler{rt: rt},
-		body,
-		func() { loopCleanups.Add(1) },
-		func() { offLoopCleanups.Add(1) },
-	)
-	exited := make(chan struct{})
-	go func() {
-		streamBody.pump()
-		close(exited)
-	}()
-	awaitSignal(t, exited, "terminal pump exit after scheduler rejection")
-	if got := body.closeCount.Load(); got != 1 {
-		t.Fatalf("response body Close called %d times", got)
-	}
-	if got := loopCleanups.Load(); got != 0 {
-		t.Fatalf("loop cleanup called %d times off-loop", got)
-	}
-	if got := offLoopCleanups.Load(); got != 1 {
-		t.Fatalf("off-loop cleanup called %d times", got)
-	}
 }
 
 func (s immediateScheduler) Runtime() *goja.Runtime {
@@ -350,131 +279,6 @@ func TestFetchStreamAbortPreservesExactReason(t *testing.T) {
 	if got := body.closeCount.Load(); got != 1 {
 		t.Fatalf("body Close called %d times", got)
 	}
-}
-
-func TestStreamingBodyBackpressureAndCancellation(t *testing.T) {
-	t.Run("read error exits", func(t *testing.T) {
-		body := newControlledReadCloser(1)
-		body.reads <- controlledRead{err: errors.New("terminal read error")}
-		var cleanups atomic.Int32
-		streamBody := newStreamingBody(immediateScheduler{rt: goja.New()}, body, func() {
-			cleanups.Add(1)
-		}, nil)
-		exited := make(chan struct{})
-		go func() {
-			streamBody.pump()
-			close(exited)
-		}()
-
-		awaitSignal(t, exited, "pump exit")
-		if got := body.closeCount.Load(); got != 1 {
-			t.Fatalf("body Close called %d times", got)
-		}
-		if got := cleanups.Load(); got != 1 {
-			t.Fatalf("cleanup called %d times", got)
-		}
-	})
-
-	t.Run("blocked read", func(t *testing.T) {
-		body := newControlledReadCloser(0)
-		var cleanups atomic.Int32
-		streamBody := newStreamingBody(immediateScheduler{rt: goja.New()}, body, func() {
-			cleanups.Add(1)
-		}, nil)
-		exited := make(chan struct{})
-		go func() {
-			streamBody.pump()
-			close(exited)
-		}()
-		awaitSignal(t, body.readStarted, "body Read start")
-
-		streamBody.close()
-		awaitSignal(t, exited, "pump exit")
-		streamBody.close()
-
-		if got := body.closeCount.Load(); got != 1 {
-			t.Fatalf("body Close called %d times", got)
-		}
-		if got := cleanups.Load(); got != 1 {
-			t.Fatalf("cleanup called %d times", got)
-		}
-	})
-
-	t.Run("high water blocks and resumes", func(t *testing.T) {
-		body := newControlledReadCloser(17)
-		want := make([]byte, 17)
-		for i := range want {
-			want[i] = byte(i)
-			body.reads <- controlledRead{data: []byte{byte(i)}}
-		}
-		var cleanups atomic.Int32
-		streamBody := newStreamingBody(immediateScheduler{rt: goja.New()}, body, func() {
-			cleanups.Add(1)
-		}, nil)
-		exited := make(chan struct{})
-		go func() {
-			streamBody.pump()
-			close(exited)
-		}()
-
-		for i := range 16 {
-			awaitSignal(t, body.readStarted, fmt.Sprintf("Read %d", i+1))
-		}
-		waitQueueLength(t, streamBody, 16)
-		select {
-		case <-body.readStarted:
-			t.Fatal("pump read beyond highWater=16")
-		case <-time.After(30 * time.Millisecond):
-		}
-
-		got := make([]byte, 0, len(want))
-		for len(got) < len(want) {
-			chunk := takeQueuedChunk(t, streamBody)
-			got = append(got, chunk...)
-			streamBody.signalMore()
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("resumed bytes = %v, want %v", got, want)
-		}
-
-		streamBody.close()
-		awaitSignal(t, exited, "pump exit")
-		if got := body.closeCount.Load(); got != 1 {
-			t.Fatalf("body Close called %d times", got)
-		}
-		if got := cleanups.Load(); got != 1 {
-			t.Fatalf("cleanup called %d times", got)
-		}
-	})
-
-	t.Run("cancel while high water blocked", func(t *testing.T) {
-		body := newControlledReadCloser(16)
-		for i := range 16 {
-			body.reads <- controlledRead{data: []byte{byte(i)}}
-		}
-		var cleanups atomic.Int32
-		streamBody := newStreamingBody(immediateScheduler{rt: goja.New()}, body, func() {
-			cleanups.Add(1)
-		}, nil)
-		exited := make(chan struct{})
-		go func() {
-			streamBody.pump()
-			close(exited)
-		}()
-		for i := range 16 {
-			awaitSignal(t, body.readStarted, fmt.Sprintf("Read %d", i+1))
-		}
-		waitQueueLength(t, streamBody, 16)
-
-		streamBody.close()
-		awaitSignal(t, exited, "pump exit")
-		if got := body.closeCount.Load(); got != 1 {
-			t.Fatalf("body Close called %d times", got)
-		}
-		if got := cleanups.Load(); got != 1 {
-			t.Fatalf("cleanup called %d times", got)
-		}
-	})
 }
 
 func TestFetchStreamPullDoesNotBlockLoop(t *testing.T) {
@@ -702,35 +506,84 @@ func awaitSignal(t *testing.T, ch <-chan struct{}, label string) {
 	}
 }
 
-func waitQueueLength(t *testing.T, body *streamingBody, want int) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		body.mu.Lock()
-		got := len(body.queue)
-		body.mu.Unlock()
-		if got == want {
-			return
+func TestFetchStreamDoesNotReadAheadOfConsumer(t *testing.T) {
+	body := newControlledReadCloser(0)
+	loop := startFetchLoop(t)
+	runSync(t, loop, func(rt *goja.Runtime) {
+		Enable(rt)
+		if err := EnableFetch(rt, loop, WithHTTPClient(responseClient(body))); err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timeout waiting for queue length %d", want)
-}
+		_, err := rt.RunString(`
+			globalThis.__done = false
+			let releaseGate = null
+			globalThis.__gate = () => new Promise((resolve) => { releaseGate = resolve })
+			globalThis.__releaseGate = () => {
+				if (releaseGate) { const release = releaseGate; releaseGate = null; release() }
+			}
+			;(async () => {
+				const response = await fetch("http://stream.test/backpressure")
+				globalThis.__responseReady = true
+				await __gate()
+				const reader = response.body.getReader()
+				const first = await reader.read()
+				globalThis.__chunk1 = String.fromCharCode(...first.value)
+				globalThis.__chunkDelivered = true
+				await __gate()
+				const second = await reader.read()
+				globalThis.__chunk2 = String.fromCharCode(...second.value)
+				await reader.read()
+			})().catch((error) => {
+				globalThis.__err = String(error && error.stack || error)
+			}).finally(() => { globalThis.__done = true })
+		`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 
-func takeQueuedChunk(t *testing.T, body *streamingBody) []byte {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		body.mu.Lock()
-		if len(body.queue) > 0 {
-			chunk := body.queue[0]
-			body.queue = body.queue[1:]
-			body.mu.Unlock()
-			return chunk
-		}
-		body.mu.Unlock()
-		time.Sleep(time.Millisecond)
+	// Phase 1: with no consumer at all, at most a single readahead Read may
+	// happen; nothing may be read beyond it.
+	waitBool(t, loop, "__responseReady")
+	awaitSignal(t, body.readStarted, "single readahead Read")
+	body.reads <- controlledRead{data: []byte("x")}
+	select {
+	case <-body.readStarted:
+		t.Fatal("body was read beyond a single chunk of readahead")
+	case <-time.After(30 * time.Millisecond):
 	}
-	t.Fatal("timeout waiting for queued chunk")
-	return nil
+
+	// Phase 2: the first consumer read is served from the readahead chunk.
+	runSync(t, loop, func(rt *goja.Runtime) {
+		_, _ = rt.RunString(`__releaseGate()`)
+	})
+	waitBool(t, loop, "__chunkDelivered")
+
+	// Phase 3: while the consumer is parked again, exactly one readahead.
+	awaitSignal(t, body.readStarted, "demand-driven readahead Read")
+	body.reads <- controlledRead{data: []byte("y")}
+	select {
+	case <-body.readStarted:
+		t.Fatal("body was read beyond a single chunk of readahead while parked")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	runSync(t, loop, func(rt *goja.Runtime) {
+		_, _ = rt.RunString(`__releaseGate()`)
+	})
+	awaitSignal(t, body.readStarted, "final body Read")
+	body.reads <- controlledRead{err: io.EOF}
+	waitBool(t, loop, "__done")
+	if got := gstr(t, loop, "__err"); got != "" {
+		t.Fatalf("stream rejected: %s", got)
+	}
+	if got := gstr(t, loop, "__chunk1"); got != "x" {
+		t.Fatalf("first chunk = %q, want %q", got, "x")
+	}
+	if got := gstr(t, loop, "__chunk2"); got != "y" {
+		t.Fatalf("second chunk = %q, want %q", got, "y")
+	}
+	if got := body.closeCount.Load(); got != 1 {
+		t.Fatalf("body Close called %d times", got)
+	}
 }

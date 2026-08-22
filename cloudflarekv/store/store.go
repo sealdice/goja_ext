@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"time"
 )
 
@@ -18,6 +19,36 @@ type NamespaceStore interface {
 	Get(ctx context.Context, key string) (Record, bool, error)
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, options ListOptions) (ListResult, error)
+}
+
+// StreamGetter is an optional capability for stores that can expose values
+// without first materializing them as a byte slice.
+type StreamGetter interface {
+	GetStream(ctx context.Context, key string) (StreamRecord, bool, error)
+}
+
+// StreamPutter is an optional capability for stores that can consume values
+// incrementally. Implementations must not make a partial value visible: a
+// value is committed only after body reaches EOF and the method returns nil.
+type StreamPutter interface {
+	PutStream(ctx context.Context, key string, body io.Reader, options PutOptions) error
+}
+
+// BulkGetter is an optional capability for stores that can retrieve multiple
+// complete records more efficiently than repeated Get calls. Missing keys are
+// omitted from the returned map.
+type BulkGetter interface {
+	GetMany(ctx context.Context, keys []string) (map[string]Record, error)
+}
+
+// StreamRecord describes one immutable value snapshot. Body belongs to the
+// caller and must be closed. Size is -1 when the length is unknown.
+type StreamRecord struct {
+	Key        string
+	Body       io.ReadCloser
+	Size       int64
+	Metadata   json.RawMessage
+	Expiration *time.Time
 }
 
 type PutOptions struct {

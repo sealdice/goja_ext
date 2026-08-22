@@ -9,7 +9,6 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import runtimeProcess = require("process");
-import { Readable, Transform } from "stream";
 import { ReadableStream as RuntimeReadableStream } from "streams";
 import { StringDecoder } from "string_decoder";
 import { structuredClone as clone } from "structuredclone";
@@ -38,20 +37,22 @@ const request: Promise<void> = fetchEventSource("https://example.test/sse", {
 void request;
 void EventStreamContentType;
 
-fs.writeFileSync("a.txt", "a");
-fs.readFile("a.txt", (error, value) => { if (!error) void value.byteLength; });
+fs.writeFileSync("a.txt", bytes);
+fs.writeTextFileSync("text.txt", "a");
+const fileInfo: Promise<fs.FileInfo> = fs.stat("a.txt");
+const dirEntries: AsyncIterable<fs.DirEntry> = fs.readDir(".");
 const fileBytes: Promise<Uint8Array> = fsPromises.readFile("a.txt");
+void fileInfo;
+void dirEntries;
 void fileBytes;
 void path.posix.join("a", "b");
 runtimeProcess.chdir(runtimeProcess.cwd());
 
-const readable = new Readable({ read() { this.push(bytes); this.push(null); } });
-const transform = new Transform({ transform(chunk, _encoding, callback) { callback(null, chunk); } });
-readable.pipe(transform);
-
 const webStream = new RuntimeReadableStream<Uint8Array>({ start(controller) { controller.close(); } });
-const classic = Readable.fromWeb(webStream);
-void classic;
+const streamedWrite: Promise<void> = fs.writeFile("stream.bin", webStream, {
+  signal: abortController.signal,
+});
+void streamedWrite;
 void fetch("https://example.test/upload", {
   method: "POST",
   body: webStream,
@@ -87,13 +88,19 @@ void fs;
 import("node:events");
 import("node:abort");
 import("node:fetch");
+// @ts-expect-error Node-style fs is intentionally unsupported.
 import("node:fs");
+// @ts-expect-error Node-style fs promises are intentionally unsupported.
 import("node:fs/promises");
 import("node:path");
 import("node:process");
+// @ts-expect-error Node classic streams are intentionally unsupported.
 import("node:stream");
 import("node:stream/web");
+// @ts-expect-error The nonstandard plural Node alias is intentionally unsupported.
 import("node:streams");
+// @ts-expect-error Node classic streams are intentionally unsupported.
+import("stream");
 import("node:string_decoder");
 import("node:structuredclone");
 import("node:timers");

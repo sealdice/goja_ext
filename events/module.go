@@ -40,8 +40,7 @@ func Require(rt *goja.Runtime, module *goja.Object) {
 }
 
 // Exports returns the canonical events module exports for rt. The same object
-// is shared by require("events"), require("node:events") and the streamx
-// facade, guaranteeing constructor identity.
+// is shared by require("events"), require("node:events") and host integrations.
 func Exports(rt *goja.Runtime) *goja.Object {
 	if value, ok := runtimehost.Load(rt, moduleKey); ok {
 		return value.(*goja.Object)

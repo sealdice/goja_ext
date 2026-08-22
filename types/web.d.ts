@@ -25,7 +25,6 @@ declare module "streams" {
 
 declare module "stream/web" { export * from "streams"; }
 declare module "node:stream/web" { export * from "streams"; }
-declare module "node:streams" { export * from "streams"; }
 declare module "node:abort" { export * from "abort"; }
 
 declare module "structuredclone" {

@@ -276,3 +276,33 @@ func TestClosedHandleOperations(t *testing.T) {
 		t.Fatalf("second Close: expected nil, got %v", err)
 	}
 }
+
+func TestFileHandlePreservesBytesReturnedWithEOF(t *testing.T) {
+	backend := afero.NewMemMapFs()
+	core, err := NewCore(WithFS(backend), WithCwd("/"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := backend.OpenFile("value", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := newFileHandle(core, &dataAndEOFFile{File: file})
+	buffer := make([]byte, 1)
+	n, readErr := handle.Read(buffer)
+	if n != 1 || !errors.Is(readErr, io.EOF) || buffer[0] != 'x' {
+		t.Fatalf("Read = (%d, %v, %q), want (1, EOF, x)", n, readErr, buffer)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type dataAndEOFFile struct {
+	afero.File
+}
+
+func (file *dataAndEOFFile) Read(p []byte) (int, error) {
+	p[0] = 'x'
+	return 1, io.EOF
+}

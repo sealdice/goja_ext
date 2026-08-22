@@ -6,4 +6,5 @@
 /// <reference path="events.d.ts" />
 /// <reference path="fs.d.ts" />
 /// <reference path="node.d.ts" />
+/// <reference path="cloudflarekv.d.ts" />
 /// <reference path="globals.d.ts" />

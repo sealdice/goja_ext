@@ -108,6 +108,7 @@ type EventLoop struct {
 	terminated bool
 
 	enableConsole bool
+	consoleConfig *console.Config
 	registry      *require.Registry
 	jsRequire     *require.RequireModule
 
@@ -152,6 +153,9 @@ func NewEventLoop(opts ...Option) *EventLoop {
 	}
 	loop.jsRequire = loop.registry.Enable(vm)
 	if loop.enableConsole {
+		if loop.consoleConfig != nil {
+			loop.registry.RegisterNativeModule(console.ModuleName, console.RequireWithConfig(*loop.consoleConfig))
+		}
 		console.Enable(vm)
 	}
 	_ = vm.Set("setTimeout", loop.setTimeout)
@@ -209,6 +213,18 @@ type Option func(*EventLoop)
 func EnableConsole(enableConsole bool) Option {
 	return func(loop *EventLoop) {
 		loop.enableConsole = enableConsole
+	}
+}
+
+// WithConsoleConfig applies a console config (source tagging and filtering) to
+// the runtime used by the loop. The config is registered as a registry-native
+// "console" module, so it takes precedence over the default module. Pass
+// console.Config{} to fall back to default behavior. No-op when console is
+// disabled via EnableConsole(false).
+func WithConsoleConfig(cfg console.Config) Option {
+	return func(loop *EventLoop) {
+		cfg := cfg
+		loop.consoleConfig = &cfg
 	}
 }
 

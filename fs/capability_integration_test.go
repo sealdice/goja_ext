@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-func TestNodeFacadeUsesInjectedLinkCapabilities(t *testing.T) {
+func TestDenoFacadeUsesInjectedLinkCapabilities(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "target.txt"), []byte("target"), 0o600); err != nil {
 		t.Fatal(err)
@@ -33,14 +33,14 @@ func TestNodeFacadeUsesInjectedLinkCapabilities(t *testing.T) {
 	value, err := rt.RunString(`
 		const fs = require("fs");
 		const stat = fs.lstatSync("link.txt");
-		const target = fs.readlinkSync("link.txt");
-		const resolved = fs.realpathSync("link.txt");
+		const target = fs.readLinkSync("link.txt");
+		const resolved = fs.realPathSync("link.txt");
 		fs.symlinkSync("target.txt", "created.txt");
 		[
-			stat.isSymbolicLink(),
+			stat.isSymlink,
 			target,
 			resolved,
-			fs.lstatSync("created.txt").isSymbolicLink()
+			fs.lstatSync("created.txt").isSymlink
 		].join("|");
 	`)
 	if err != nil {

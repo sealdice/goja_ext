@@ -262,7 +262,7 @@ func TestPutExpirationTimestampIsRecorded(t *testing.T) {
 			return err
 		}
 		_, err := vm.RunString(`
-			KV.put("exp", "v", {expiration: 1700000000})
+			KV.put("exp", "v", {expiration: 4102444800})
 				.then(function () {
 					done("ok");
 				})
@@ -280,7 +280,7 @@ func TestPutExpirationTimestampIsRecorded(t *testing.T) {
 	if expiration == nil {
 		t.Fatal("expected expiration to be recorded")
 	}
-	want := time.Unix(1700000000, 0).UTC()
+	want := time.Unix(4102444800, 0).UTC()
 	if !expiration.Equal(want) {
 		t.Fatalf("expiration = %v, want %v", expiration, want)
 	}

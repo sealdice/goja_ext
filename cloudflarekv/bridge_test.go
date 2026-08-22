@@ -14,6 +14,38 @@ import (
 	"github.com/dop251/goja_nodejs/streams"
 )
 
+func TestBindNamespaceObjectDoesNotCreateGlobalBinding(t *testing.T) {
+	loop := eventloop.NewEventLoop()
+	loop.Start()
+	defer loop.Stop()
+
+	mem := newMemStore()
+	result := runScript(t, loop, func(vm *goja.Runtime) error {
+		target := vm.NewObject()
+		if err := cloudflarekv.BindNamespaceObject(vm, loop, target, mem); err != nil {
+			return err
+		}
+		if err := cloudflarekv.BindSyncNamespaceObject(vm, target, mem); err != nil {
+			return err
+		}
+		if vm.Get("KV") != nil && !goja.IsUndefined(vm.Get("KV")) {
+			return errors.New("unexpected global KV binding")
+		}
+		if err := target.Set("marker", "ok"); err != nil {
+			return err
+		}
+		if err := vm.Set("storageTarget", target); err != nil {
+			return err
+		}
+		_, err := vm.RunString(`done(storageTarget.marker)`)
+		return err
+	})
+
+	if result != "ok" {
+		t.Fatalf("unexpected result: %q", result)
+	}
+}
+
 func TestBindNamespaceSupportsJSONListAndMetadata(t *testing.T) {
 	loop := eventloop.NewEventLoop()
 	loop.Start()
@@ -686,6 +718,45 @@ func TestBindSyncNamespaceRejectsReadableStreamPut(t *testing.T) {
 	}
 }
 
+// textCodecScript provides minimal TextEncoder/TextDecoder globals so the
+// ReadableStream tests do not depend on other modules registering them.
+const textCodecScript = `
+	function TextEncoder() {}
+	TextEncoder.prototype.encode = function (str) {
+		var bytes = [];
+		for (var i = 0; i < str.length; i++) {
+			var code = str.charCodeAt(i);
+			if (code < 0x80) {
+				bytes.push(code);
+			} else if (code < 0x800) {
+				bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+			} else {
+				bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+			}
+		}
+		return new Uint8Array(bytes);
+	};
+	function TextDecoder() {}
+	TextDecoder.prototype.decode = function (bytes) {
+		var out = [];
+		var i = 0;
+		while (i < bytes.length) {
+			var b = bytes[i];
+			if (b < 0x80) {
+				out.push(String.fromCharCode(b));
+				i++;
+			} else if (b < 0xe0) {
+				out.push(String.fromCharCode(((b & 0x1f) << 6) | (bytes[i + 1] & 0x3f)));
+				i += 2;
+			} else {
+				out.push(String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)));
+				i += 3;
+			}
+		}
+		return out.join("");
+	};
+`
+
 func runScript(t *testing.T, loop *eventloop.EventLoop, run func(vm *goja.Runtime) error) string {
 	t.Helper()
 
@@ -693,6 +764,10 @@ func runScript(t *testing.T, loop *eventloop.EventLoop, run func(vm *goja.Runtim
 	errCh := make(chan error, 1)
 
 	loop.RunOnLoop(func(vm *goja.Runtime) {
+		if _, err := vm.RunString(textCodecScript); err != nil {
+			errCh <- err
+			return
+		}
 		if err := vm.Set("done", func(value string) {
 			doneCh <- value
 		}); err != nil {
