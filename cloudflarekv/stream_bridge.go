@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/dop251/goja"
@@ -13,12 +12,6 @@ import (
 	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/dop251/goja_nodejs/streams"
 )
-
-type storageStreamSource struct {
-	body      io.ReadCloser
-	loop      *eventloop.EventLoop
-	closeOnce sync.Once
-}
 
 type maximumReader struct {
 	reader    io.Reader
@@ -124,10 +117,6 @@ func (r storageGetResult) metadata() []byte {
 	return r.record.Metadata
 }
 
-func (s *storageStreamSource) close() {
-	s.closeOnce.Do(func() { _ = s.body.Close() })
-}
-
 func streamRecordToReadableStream(
 	vm *goja.Runtime,
 	loop *eventloop.EventLoop,
@@ -148,51 +137,20 @@ func streamRecordToReadableStream(
 			closer:        record.Body,
 		}
 	}
-	source := &storageStreamSource{body: body, loop: loop}
-	stream, err := streams.NewReadableStream(vm, streams.ReadableStreamSource{
-		Pull: func(controller *goja.Object) goja.Value {
-			promise, resolve, reject := vm.NewPromise()
-			go func() {
-				buffer := make([]byte, readableStreamChunkSize)
-				n, readErr := source.body.Read(buffer)
-				if !source.loop.RunOnLoop(func(loopVM *goja.Runtime) {
-					if n > 0 {
-						chunk := append([]byte(nil), buffer[:n]...)
-						callObjectMethodOrPanic(
-							loopVM,
-							controller,
-							"enqueue",
-							loopVM.ToValue(loopVM.NewArrayBuffer(chunk)),
-						)
-					}
-					switch {
-					case readErr != nil && !errors.Is(readErr, io.EOF):
-						source.close()
-						callObjectMethodOrPanic(loopVM, controller, "error", jsErrorValue(loopVM, readErr))
-						_ = reject(jsErrorValue(loopVM, readErr))
-					case errors.Is(readErr, io.EOF):
-						source.close()
-						callObjectMethodOrPanic(loopVM, controller, "close")
-						_ = resolve(goja.Undefined())
-					default:
-						_ = resolve(goja.Undefined())
-					}
-				}) {
-					source.close()
-				}
-			}()
-			return vm.ToValue(promise)
-		},
-		Cancel: func(goja.Value) goja.Value {
-			source.close()
-			return goja.Undefined()
-		},
-	})
+	stream, err := streams.NewReadableStreamFromReader(
+		vm,
+		loop,
+		body,
+		streams.WithChunkSize(readableStreamChunkSize),
+		streams.WithChunkValue(streams.ArrayBufferChunk),
+		streams.WithMapError(func(rt *goja.Runtime, err error) goja.Value {
+			return rt.ToValue(err.Error())
+		}),
+	)
 	if err != nil {
-		source.close()
 		return nil, err
 	}
-	return stream, nil
+	return stream.Stream(), nil
 }
 
 func putReadableStreamWithCapability(

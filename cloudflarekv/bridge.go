@@ -815,30 +815,12 @@ func classifyStringValue(value string) store.ValueKind {
 }
 
 func bytesToReadableStreamValue(vm *goja.Runtime, value []byte) (goja.Value, error) {
-	data := append([]byte(nil), value...)
-	offset := 0
-
-	stream, err := streams.NewReadableStream(vm, streams.ReadableStreamSource{
-		Pull: func(controller *goja.Object) goja.Value {
-			if offset >= len(data) {
-				callObjectMethodOrPanic(vm, controller, "close")
-				return goja.Undefined()
-			}
-
-			end := offset + readableStreamChunkSize
-			if end > len(data) {
-				end = len(data)
-			}
-			chunk := append([]byte(nil), data[offset:end]...)
-			offset = end
-			callObjectMethodOrPanic(vm, controller, "enqueue", vm.ToValue(vm.NewArrayBuffer(chunk)))
-			return goja.Undefined()
-		},
-		Cancel: func(reason goja.Value) goja.Value {
-			offset = len(data)
-			return goja.Undefined()
-		},
-	})
+	stream, err := streams.NewReadableStreamFromBytes(
+		vm,
+		value,
+		readableStreamChunkSize,
+		streams.WithChunkValue(streams.ArrayBufferChunk),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -935,14 +917,4 @@ func valueOrUndefined(value goja.Value) goja.Value {
 		return goja.Undefined()
 	}
 	return value
-}
-
-func callObjectMethodOrPanic(vm *goja.Runtime, object *goja.Object, name string, args ...goja.Value) {
-	method, ok := goja.AssertFunction(object.Get(name))
-	if !ok {
-		panic(vm.NewTypeError("%s is not callable", name))
-	}
-	if _, err := method(object, args...); err != nil {
-		panic(err)
-	}
 }
