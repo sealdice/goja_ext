@@ -537,3 +537,36 @@ func TestReaderStreamConstructionFailureClosesReader(t *testing.T) {
 		t.Fatal("OnSettled was not called on construction failure")
 	}
 }
+
+func TestReaderFromBytesChunksCloseAndCancel(t *testing.T) {
+	rt := goja.New()
+	stream, err := streams.NewReadableStreamFromBytes(rt, []byte("hello"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Set("__s", stream); err != nil {
+		t.Fatal(err)
+	}
+	value, err := rt.RunString(`
+		(async () => {
+			const reader = __s.getReader();
+			const first = await reader.read();
+			await reader.cancel("stop");
+			return JSON.stringify([
+				String.fromCharCode(...first.value),
+				first.value instanceof Uint8Array,
+				first.value.byteLength,
+			]);
+		})()
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promise := value.Export().(*goja.Promise)
+	if promise.State() != goja.PromiseStateFulfilled {
+		t.Fatalf("state = %v, result = %v", promise.State(), promise.Result())
+	}
+	if got, want := promise.Result().String(), `["he",true,2]`; got != want {
+		t.Fatalf("result = %s, want %s", got, want)
+	}
+}

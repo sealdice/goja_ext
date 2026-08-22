@@ -334,3 +334,36 @@ func callStreamController(rt *goja.Runtime, controller *goja.Object, name string
 		panic(err)
 	}
 }
+
+// NewReadableStreamFromBytes returns a ReadableStream that delivers data in
+// fixed-size chunks. Pulls are satisfied synchronously, so no scheduler is
+// required; data is copied per chunk.
+func NewReadableStreamFromBytes(
+	rt *goja.Runtime,
+	data []byte,
+	chunkSize int,
+	opts ...ReaderStreamOption,
+) (*goja.Object, error) {
+	config := newReaderConfig()
+	config.chunkSize = chunkSize
+	config.apply(opts)
+
+	offset := 0
+	return NewReadableStream(rt, ReadableStreamSource{
+		Pull: func(controller *goja.Object) goja.Value {
+			if offset >= len(data) {
+				callStreamController(rt, controller, "close")
+				return goja.Undefined()
+			}
+			end := min(offset+config.chunkSize, len(data))
+			chunk := append([]byte(nil), data[offset:end]...)
+			offset = end
+			callStreamController(rt, controller, "enqueue", config.chunkValue(rt, chunk))
+			return goja.Undefined()
+		},
+		Cancel: func(goja.Value) goja.Value {
+			offset = len(data)
+			return goja.Undefined()
+		},
+	})
+}
