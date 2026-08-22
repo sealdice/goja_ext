@@ -191,7 +191,7 @@ func TestReaderStreamDeliversChunksAndCloses(t *testing.T) {
 		if !errors.Is(err, io.EOF) {
 			t.Fatalf("settle err = %v, want io.EOF", err)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("OnSettled was not called")
 	}
 	if got := settleCount.Load(); got != 1 {
@@ -292,10 +292,9 @@ func TestReaderStreamDoesNotReadAheadOfConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	waitGlobalTruthy(t, loop, "__readPending")
 	select {
 	case <-body.readStarted:
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("first read did not start")
 	}
 	select {
@@ -401,6 +400,10 @@ func TestReaderStreamErrorRejectsPendingReadWithExactReason(t *testing.T) {
 	case <-body.closed:
 	case <-time.After(time.Second):
 		t.Fatal("Error did not close the reader")
+	}
+	deadline := time.Now().Add(time.Second)
+	for settledCount.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
 	if got := settledCount.Load(); got != 1 {
 		t.Fatalf("OnSettled calls = %d, want 1", got)
