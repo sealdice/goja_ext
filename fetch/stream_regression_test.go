@@ -516,13 +516,23 @@ func TestFetchStreamDoesNotReadAheadOfConsumer(t *testing.T) {
 		}
 		_, err := rt.RunString(`
 			globalThis.__done = false
+			let releaseGate = null
+			globalThis.__gate = () => new Promise((resolve) => { releaseGate = resolve })
+			globalThis.__releaseGate = () => {
+				if (releaseGate) { const release = releaseGate; releaseGate = null; release() }
+			}
 			;(async () => {
-				const reader = (await fetch("http://stream.test/backpressure")).body.getReader()
-				const pending = reader.read()
-				globalThis.__readPending = true
-				const item = await pending
-				globalThis.__chunk = String.fromCharCode(...item.value)
-				await reader.cancel("test complete")
+				const response = await fetch("http://stream.test/backpressure")
+				globalThis.__responseReady = true
+				await __gate()
+				const reader = response.body.getReader()
+				const first = await reader.read()
+				globalThis.__chunk1 = String.fromCharCode(...first.value)
+				globalThis.__chunkDelivered = true
+				await __gate()
+				const second = await reader.read()
+				globalThis.__chunk2 = String.fromCharCode(...second.value)
+				await reader.read()
 			})().catch((error) => {
 				globalThis.__err = String(error && error.stack || error)
 			}).finally(() => { globalThis.__done = true })
@@ -531,20 +541,47 @@ func TestFetchStreamDoesNotReadAheadOfConsumer(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	waitBool(t, loop, "__readPending")
-	awaitSignal(t, body.readStarted, "first body Read")
+
+	// Phase 1: with no consumer at all, at most a single readahead Read may
+	// happen; nothing may be read beyond it.
+	waitBool(t, loop, "__responseReady")
+	awaitSignal(t, body.readStarted, "single readahead Read")
+	body.reads <- controlledRead{data: []byte("x")}
 	select {
 	case <-body.readStarted:
-		t.Fatal("body was read ahead of consumer demand")
+		t.Fatal("body was read beyond a single chunk of readahead")
 	case <-time.After(30 * time.Millisecond):
 	}
-	body.reads <- controlledRead{data: []byte("x")}
+
+	// Phase 2: the first consumer read is served from the readahead chunk.
+	runSync(t, loop, func(rt *goja.Runtime) {
+		_, _ = rt.RunString(`__releaseGate()`)
+	})
+	waitBool(t, loop, "__chunkDelivered")
+
+	// Phase 3: while the consumer is parked again, exactly one readahead.
+	awaitSignal(t, body.readStarted, "demand-driven readahead Read")
+	body.reads <- controlledRead{data: []byte("y")}
+	select {
+	case <-body.readStarted:
+		t.Fatal("body was read beyond a single chunk of readahead while parked")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	runSync(t, loop, func(rt *goja.Runtime) {
+		_, _ = rt.RunString(`__releaseGate()`)
+	})
+	awaitSignal(t, body.readStarted, "final body Read")
+	body.reads <- controlledRead{err: io.EOF}
 	waitBool(t, loop, "__done")
 	if got := gstr(t, loop, "__err"); got != "" {
 		t.Fatalf("stream rejected: %s", got)
 	}
-	if got := gstr(t, loop, "__chunk"); got != "x" {
-		t.Fatalf("chunk = %q, want %q", got, "x")
+	if got := gstr(t, loop, "__chunk1"); got != "x" {
+		t.Fatalf("first chunk = %q, want %q", got, "x")
+	}
+	if got := gstr(t, loop, "__chunk2"); got != "y" {
+		t.Fatalf("second chunk = %q, want %q", got, "y")
 	}
 	if got := body.closeCount.Load(); got != 1 {
 		t.Fatalf("body Close called %d times", got)
