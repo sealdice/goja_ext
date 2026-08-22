@@ -2,93 +2,64 @@ package fs
 
 import (
 	"errors"
-	"io"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja_nodejs/streams"
 )
 
-type fileStreamReadResult struct {
-	data []byte
-	done bool
+type fileHandleReadCloser struct {
+	handle *FileHandle
 }
+
+func (r *fileHandleReadCloser) Read(p []byte) (int, error) { return r.handle.Read(p) }
+
+// Close 等待在途读完成后物理关闭文件，只能在后台 goroutine 调用。
+func (r *fileHandleReadCloser) Close() error { return r.handle.closeAndWait() }
+
+type fileHandleWriteCloser struct {
+	handle *FileHandle
+}
+
+func (w *fileHandleWriteCloser) Write(p []byte) (int, error) {
+	if err := w.handle.WriteAll(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// Close 等待在途写完成后物理关闭文件，只能在后台 goroutine 调用。
+func (w *fileHandleWriteCloser) Close() error { return w.handle.closeAndWait() }
 
 func newFileReadableStream(instance *moduleInstance, handle *FileHandle) goja.Value {
 	rt := instance.rt
-	stream, err := streams.NewReadableStream(rt, streams.ReadableStreamSource{
-		Pull: func(controller *goja.Object) goja.Value {
-			return instance.promiseCall(func() (any, error) {
-				data := make([]byte, instance.core.ChunkSize())
-				n, readErr := handle.Read(data)
-				done := errors.Is(readErr, io.EOF)
-				if readErr != nil && !done {
-					_ = handle.closeAndWait()
-					return nil, readErr
-				}
-				if done {
-					if closeErr := handle.closeAndWait(); closeErr != nil {
-						return nil, closeErr
-					}
-				}
-				return fileStreamReadResult{
-					data: append([]byte(nil), data[:n]...),
-					done: done,
-				}, nil
-			}, func(rt *goja.Runtime, value any) goja.Value {
-				result := value.(fileStreamReadResult)
-				if len(result.data) > 0 {
-					callController(rt, controller, "enqueue", bytesValue(rt, result.data))
-				}
-				if result.done {
-					callController(rt, controller, "close")
-				}
-				return goja.Undefined()
-			})
-		},
-		Cancel: func(reason goja.Value) goja.Value {
+	stream, err := streams.NewReadableStreamFromReader(
+		rt,
+		instance.scheduler,
+		&fileHandleReadCloser{handle: handle},
+		streams.WithChunkSize(instance.core.ChunkSize()),
+		streams.WithMapError(jsErrorValue),
+		streams.WithOnCancel(func(rt *goja.Runtime, reason goja.Value) goja.Value {
 			_ = reason
 			return instance.promiseCall(func() (any, error) {
 				return nil, handle.closeAndWait()
 			}, nil)
-		},
-	})
+		}),
+	)
 	if err != nil {
 		panicJSError(rt, err)
 	}
-	return stream
+	return stream.Stream()
 }
 
 func newFileWritableStream(instance *moduleInstance, handle *FileHandle) goja.Value {
 	rt := instance.rt
-	stream, err := streams.NewWritableStream(rt, streams.WritableStreamSink{
-		Write: func(chunk goja.Value, _ *goja.Object) goja.Value {
-			data, err := bytesFromValue(rt, chunk)
-			if err != nil {
-				return instance.promiseCall(func() (any, error) {
-					_ = handle.closeAndWait()
-					return nil, err
-				}, nil)
-			}
-			return instance.promiseCall(func() (any, error) {
-				writeErr := handle.WriteAll(data)
-				if writeErr != nil {
-					_ = handle.closeAndWait()
-				}
-				return nil, writeErr
-			}, nil)
-		},
-		Close: func() goja.Value {
-			return instance.promiseCall(func() (any, error) {
-				return nil, handle.closeAndWait()
-			}, nil)
-		},
-		Abort: func(reason goja.Value) goja.Value {
-			_ = reason
-			return instance.promiseCall(func() (any, error) {
-				return nil, handle.closeAndWait()
-			}, nil)
-		},
-	})
+	stream, err := streams.NewWritableStreamToWriter(
+		rt,
+		instance.scheduler,
+		&fileHandleWriteCloser{handle: handle},
+		streams.WithDecodeChunk(bytesFromValue),
+		streams.WithMapWriteError(jsErrorValue),
+	)
 	if err != nil {
 		panicJSError(rt, err)
 	}
@@ -229,16 +200,6 @@ func (m *moduleInstance) openWriteHandle(name string, options writeFileOptions) 
 		flags |= openCreateNew
 	}
 	return m.core.OpenFile(name, flags, options.mode)
-}
-
-func callController(rt *goja.Runtime, controller *goja.Object, name string, args ...goja.Value) {
-	fn, ok := goja.AssertFunction(controller.Get(name))
-	if !ok {
-		panic(rt.NewTypeError("ReadableStream controller method %s is not callable", name))
-	}
-	if _, err := fn(controller, args...); err != nil {
-		panic(err)
-	}
 }
 
 func callObjectMethod(object *goja.Object, name string, args ...goja.Value) (goja.Value, error) {
