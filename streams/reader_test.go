@@ -1,6 +1,7 @@
 package streams_test
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -571,5 +572,43 @@ func TestReaderFromBytesChunksCloseAndCancel(t *testing.T) {
 	}
 	if got, want := promise.Result().String(), `["he",true,2]`; got != want {
 		t.Fatalf("result = %s, want %s", got, want)
+	}
+}
+
+func BenchmarkReaderStreamPump1MiB(b *testing.B) {
+	payload := make([]byte, 1024*1024)
+	loop := eventloop.NewEventLoop()
+	loop.Start()
+	defer loop.Stop()
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		finished := make(chan struct{})
+		loop.RunOnLoop(func(vm *goja.Runtime) {
+			_ = vm.Set("__benchDone", func(goja.FunctionCall) goja.Value {
+				close(finished)
+				return goja.Undefined()
+			})
+			source, err := streams.NewReadableStreamFromReader(vm, loop, io.NopCloser(bytes.NewReader(payload)))
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = vm.Set("__s", source.Stream())
+			_, err = vm.RunString(`
+				(async () => {
+					const reader = __s.getReader();
+					while (!(await reader.read()).done) {}
+				})().then(() => __benchDone());
+			`)
+			if err != nil {
+				b.Fatal(err)
+			}
+		})
+		select {
+		case <-finished:
+		case <-time.After(30 * time.Second):
+			b.Fatal("timeout waiting for pump completion")
+		}
 	}
 }

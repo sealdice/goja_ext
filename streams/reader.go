@@ -73,9 +73,10 @@ func WithOnCancel(fn func(rt *goja.Runtime, reason goja.Value) goja.Value) Reade
 	return func(config *readerConfig) { config.onCancel = fn }
 }
 
-// WithOnSettled registers a callback invoked exactly once on the loop after
+// WithOnSettled registers a callback invoked exactly once on the loop when
 // the stream settles: end of input (err is io.EOF), read failure (err set),
-// cancellation, or Error (err nil). It runs after the controller transition.
+// cancellation, or Error (err nil). It runs before the final controller
+// transition so host cleanup is not observable as lagging behind the stream.
 func WithOnSettled(fn func(rt *goja.Runtime, err error)) ReaderStreamOption {
 	return func(config *readerConfig) { config.onSettled = fn }
 }
@@ -116,10 +117,24 @@ type ReaderStream struct {
 	settled    bool
 	settle     func(interface{}) error
 	controller *goja.Object
+	closeOnce  sync.Once
 }
 
 // Stream returns the ReadableStream object.
 func (s *ReaderStream) Stream() *goja.Object { return s.stream }
+
+// closeReader closes the reader exactly once across all terminal paths.
+func (s *ReaderStream) closeReader() {
+	s.closeOnce.Do(func() { _ = s.reader.Close() })
+}
+
+// closeReaderForRead closes the reader once and reports the close error so
+// an end-of-input close failure can replace EOF.
+func (s *ReaderStream) closeReaderForRead() error {
+	var closeErr error
+	s.closeOnce.Do(func() { closeErr = s.reader.Close() })
+	return closeErr
+}
 
 // Error terminates the stream with reason, closing the reader and running
 // the settle hooks. It must be called on the loop goroutine.
@@ -138,12 +153,12 @@ func (s *ReaderStream) Error(rt *goja.Runtime, reason goja.Value) {
 	if settle != nil {
 		_ = settle(goja.Undefined())
 	}
-	_ = s.reader.Close()
-	if controller != nil {
-		callStreamController(rt, controller, "error", valueOrUndefined(reason))
-	}
+	s.closeReader()
 	if s.config.onSettled != nil {
 		s.config.onSettled(rt, nil)
+	}
+	if controller != nil {
+		callStreamController(rt, controller, "error", valueOrUndefined(reason))
 	}
 }
 
@@ -184,7 +199,7 @@ func NewReadableStreamFromReader(
 		Cancel: func(reason goja.Value) goja.Value { return source.cancel(reason) },
 	}, strategy)
 	if err != nil {
-		_ = reader.Close()
+		source.closeReader()
 		if config.onSettled != nil {
 			config.onSettled(rt, nil)
 		}
@@ -235,7 +250,7 @@ func (s *ReaderStream) cancel(reason goja.Value) goja.Value {
 			return result
 		}
 	} else {
-		_ = s.reader.Close()
+		s.closeReader()
 	}
 	if s.config.onSettled != nil {
 		s.config.onSettled(s.rt, nil)
@@ -249,7 +264,7 @@ func (s *ReaderStream) readOnce() {
 	if readErr != nil {
 		// Terminal read: close off the loop. A close failure at end of input
 		// replaces EOF so it surfaces to the consumer.
-		if closeErr := s.reader.Close(); closeErr != nil && errors.Is(readErr, io.EOF) {
+		if closeErr := s.closeReaderForRead(); closeErr != nil && errors.Is(readErr, io.EOF) {
 			readErr = closeErr
 		}
 	}
@@ -288,22 +303,23 @@ func (s *ReaderStream) deliver(buffer []byte, n int, readErr error) {
 		return
 	}
 	rt := s.rt
+	if terminal && s.config.onSettled != nil {
+		s.config.onSettled(rt, readErr)
+	}
 	if n > 0 {
 		chunk := make([]byte, n)
 		copy(chunk, buffer[:n])
 		callStreamController(rt, controller, "enqueue", s.config.chunkValue(rt, chunk))
 	}
-	switch {
-	case terminal && errors.Is(readErr, io.EOF):
-		callStreamController(rt, controller, "close")
-	case terminal:
-		callStreamController(rt, controller, "error", s.config.mapError(rt, readErr))
+	if terminal {
+		if errors.Is(readErr, io.EOF) {
+			callStreamController(rt, controller, "close")
+		} else {
+			callStreamController(rt, controller, "error", s.config.mapError(rt, readErr))
+		}
 	}
 	if settle != nil {
 		_ = settle(goja.Undefined())
-	}
-	if terminal && s.config.onSettled != nil {
-		s.config.onSettled(rt, readErr)
 	}
 }
 
@@ -319,7 +335,7 @@ func (s *ReaderStream) abandon(readErr error) {
 	s.settle = nil
 	s.mu.Unlock()
 
-	_ = s.reader.Close()
+	s.closeReader()
 	if s.config.onSettledOff != nil {
 		s.config.onSettledOff(readErr)
 	}
